@@ -1,4 +1,4 @@
-# Lighthouse Scanner
+# Lighthouse Scanner WordPress Plugin
 
 A WordPress plugin that runs Google PageSpeed Insights scans on your site's pages directly from the WordPress admin. Track performance scores over time, get alerted after plugin or theme updates, and copy results formatted for AI-assisted debugging.
 
