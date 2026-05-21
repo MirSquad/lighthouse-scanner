@@ -1,0 +1,17 @@
+{
+  "name": "lighthouse-scanner-angie",
+  "version": "1.0.0",
+  "description": "Angie MCP server for Lighthouse Scanner plugin",
+  "scripts": {
+    "build": "vite build"
+  },
+  "dependencies": {
+    "@elementor/angie-sdk": "1.0.0",
+    "@modelcontextprotocol/sdk": "^1.13.0",
+    "zod": "^3.25.67"
+  },
+  "devDependencies": {
+    "typescript": "^5.8.2",
+    "vite": "^6.3.5"
+  }
+}

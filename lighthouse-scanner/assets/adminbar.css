@@ -1,0 +1,40 @@
+/* Lighthouse Scanner — Admin Bar Styles v2.0.2 */
+
+@keyframes lhsc-spin {
+	from { transform: rotate(0deg); }
+	to   { transform: rotate(360deg); }
+}
+
+#wpadminbar .lhsc-adminbar-top > .ab-item {
+	display: flex !important;
+	align-items: center;
+	gap: 3px;
+}
+
+.lhsc-bar-icon {
+	display: inline-block;
+	font-size: 13px;
+	line-height: 1;
+	transform-origin: center;
+}
+
+.lhsc-bar-label {
+	font-size: 13px;
+}
+
+/* Compact dropdown */
+#wpadminbar #wp-admin-bar-lhsc-bar .ab-sub-wrapper {
+	min-width: 160px;
+}
+
+#wpadminbar #wp-admin-bar-lhsc-bar-scan-page > .ab-item,
+#wpadminbar #wp-admin-bar-lhsc-bar-goto > .ab-item {
+	padding-top: 5px !important;
+	padding-bottom: 5px !important;
+	font-size: 13px !important;
+}
+
+/* Inject spin keyframe for use inside overlay inline styles */
+#lhsc-bar-overlay {
+	box-sizing: border-box;
+}
