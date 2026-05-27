@@ -1,15 +1,26 @@
 <?php
 /**
- * Plugin Name:  Lighthouse Scanner
- * Plugin URI:   https://miriamschwab.me
- * Description:  Run PageSpeed Insights scans across your site. Tracks history, alerts on regressions, and copies reports for AI-assisted fixes. Exposes a REST API (lighthouse-scanner/v1) for AI agent integration.
- * Version:      2.2.0
- * Author:       Miriam Schwab
- * License:      GPL-2.0-or-later
- * Text Domain:  lighthouse-scanner
+ * Plugin Name:       Lighthouse Scanner
+ * Plugin URI:        https://miriamschwab.me/plugins/lighthouse-scanner
+ * Description:       Run PageSpeed Insights scans across your site. Tracks history, alerts on regressions, and copies reports for AI-assisted fixes. Exposes a REST API (lighthouse-scanner/v1) for AI agent integration.
+ * Version:           2.2.0
+ * Author:            Miriam Schwab
+ * Author URI:        https://miriamschwab.me
+ * License:           GPL-2.0-or-later
+ * License URI:       https://www.gnu.org/licenses/gpl-2.0.html
+ * Text Domain:       lighthouse-scanner
+ * Domain Path:       /languages
+ * Requires at least: 5.9
+ * Requires PHP:      7.4
  */
 
-if ( ! defined( 'ABSPATH' ) ) exit;
+if ( ! defined( 'ABSPATH' ) ) {
+	exit;
+}
+
+add_action( 'init', function() {
+	load_plugin_textdomain( 'lighthouse-scanner', false, dirname( plugin_basename( __FILE__ ) ) . '/languages' );
+} );
 
 define( 'LHSC_VERSION',       '2.2.0' );
 define( 'LHSC_FILE',          __FILE__ );
@@ -150,7 +161,7 @@ add_action( 'admin_notices', function() {
 	<div class="notice notice-info lhsc-update-notice" id="lhsc-update-notice" style="display:flex;align-items:center;gap:12px;padding:10px 16px;">
 		<span>⚡ <strong><?php esc_html_e( 'Lighthouse Scanner:', 'lighthouse-scanner' ); ?></strong>
 		<?php printf( esc_html__( 'A %s was just updated. Run a scan to check for regressions.', 'lighthouse-scanner' ), esc_html( $label ) ); ?></span>
-		<a href="<?php echo $scanner_url; ?>" class="button button-small"><?php esc_html_e( 'Run scan now', 'lighthouse-scanner' ); ?></a>
+		<a href="<?php echo esc_url( $scanner_url ); ?>" class="button button-small"><?php esc_html_e( 'Run scan now', 'lighthouse-scanner' ); ?></a>
 		<a href="#" class="lhsc-dismiss-btn" data-nonce="<?php echo esc_attr( $nonce ); ?>" data-ajax="<?php echo esc_url( admin_url( 'admin-ajax.php' ) ); ?>" style="color:#999;text-decoration:none;font-size:20px;line-height:1;margin-left:4px;" title="Dismiss">&times;</a>
 	</div>
 	<script>
@@ -380,6 +391,11 @@ function lhsc_render_page() {
 	$api_key   = lhsc_get_api_key();
 	$threshold = (int) get_option( LHSC_OPT_THRESHOLD, 85 );
 	$setup     = get_option( LHSC_OPT_SETUP, false );
+	// Capture the scan URL from the admin-bar link for the "Scanning…" notice.
+	$scan_url  = '';
+	if ( ! empty( $_GET['lhsc_scan_url'] ) ) { // phpcs:ignore WordPress.Security.NonceVerification.Recommended -- Read-only URL passed from admin-bar "Scan this page" link. No state change.
+		$scan_url = esc_url_raw( wp_unslash( $_GET['lhsc_scan_url'] ) );
+	}
 	?>
 	<div class="wrap lhsc-wrap">
 		<h1><?php esc_html_e( 'Lighthouse Scanner', 'lighthouse-scanner' ); ?></h1>
@@ -430,7 +446,7 @@ function lhsc_render_page() {
 							<label class="lhsc-label" for="lhsc-api-key-input"><?php esc_html_e( 'Google API Key', 'lighthouse-scanner' ); ?></label>
 							<div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;">
 								<input type="password" id="lhsc-api-key-input" name="<?php echo esc_attr( LHSC_OPT_KEY ); ?>" value="<?php echo esc_attr( $api_key ); ?>" class="regular-text" autocomplete="off" placeholder="<?php esc_attr_e( 'Paste key here', 'lighthouse-scanner' ); ?>" />
-								<?php if ( $api_key ) echo '<span class="lhsc-key-saved">&#10003; Saved</span>'; ?>
+								<?php if ( $api_key ) echo '<span class="lhsc-key-saved">&#10003; ' . esc_html__( 'Saved', 'lighthouse-scanner' ) . '</span>'; ?>
 							</div>
 						</div>
 						<div class="lhsc-setting">

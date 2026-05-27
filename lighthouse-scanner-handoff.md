@@ -3,7 +3,7 @@ title: "Lighthouse Scanner — Handoff Doc"
 doc_type: handoff
 project: lighthouse-scanner
 created: 2026-03-24
-updated: 2026-03-29
+updated: 2026-05-25
 status: active
 summary: "Current state snapshot for the Lighthouse Scanner plugin. Read this before any session — covers version, what's working, what's fragile, and what's been ruled out."
 tags: [wordpress, plugin, performance, lighthouse, pagespeed, angie, mcp, miriamschwab-site]
@@ -26,9 +26,11 @@ A custom WordPress plugin for miriamschwab.me that runs Google PageSpeed Insight
 
 ---
 
-## Current State (as of session 9, 2026-03-24)
+## Current State (as of 2026-05-25)
 
 **Version:** 2.2.0 — stable
+
+**WP.org readiness (Session 10 — 2026-05-25):** Plugin header, i18n, and readme are now WP.org-ready. New files: `readme.txt`, `uninstall.php`, `languages/`. Bug fixed: `$scan_url` undefined in `lhsc_render_page()` — "Scanning…" notice now actually shows when arriving from the admin-bar shortcut.
 
 **What's working:**
 - Full scanning UI with device strategy (mobile/desktop)

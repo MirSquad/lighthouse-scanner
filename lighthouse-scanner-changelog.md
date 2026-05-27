@@ -3,7 +3,7 @@ title: "Lighthouse Scanner — Changelog"
 doc_type: changelog
 project: lighthouse-scanner
 created: 2026-03-24
-updated: 2026-03-29
+updated: 2026-05-25
 status: active
 summary: "Full version history for the Lighthouse Scanner plugin, from v1.0.0 through v2.2.0."
 tags: [wordpress, plugin, performance, lighthouse, pagespeed, angie, mcp, miriamschwab-site]
@@ -82,6 +82,37 @@ Custom plugin for miriamschwab.me. Located at Tools → Lighthouse Scanner in Wo
 
 ## v1.1.0
 - Fatal error fix on activation (duplicate `define()` constants)
+
+## WP.org readiness audit — 2026-05-25
+
+Code quality and compliance pass. No new features or behaviour changes.
+
+**Plugin header — missing fields added:**
+- `Author URI`, `License URI`, `Domain Path`, `Requires at least: 5.9`, `Requires PHP: 7.4`
+- `Plugin URI` updated to `https://miriamschwab.me/plugins/lighthouse-scanner`
+
+**`load_plugin_textdomain()` added:**
+- Text domain `lighthouse-scanner` now loaded on `init`
+
+**Bug fixed — `$scan_url` undefined in `lhsc_render_page()`:**
+- `$scan_url` was set inside the `admin_enqueue_scripts` closure but referenced in the separately-registered `lhsc_render_page()` function — different scopes, variable was always undefined there
+- Fix: read `$_GET['lhsc_scan_url']` directly inside `lhsc_render_page()` with phpcs:ignore
+- Visible consequence: the "Scanning X…" notice never showed when arriving from the admin-bar shortcut
+
+**`echo $scanner_url` re-escaped at output point:**
+- Added `esc_url()` wrapper on the admin-notice "Run scan now" link even though `$scanner_url` was already `esc_url()`'d at assignment — PCP flags unescaped output regardless
+
+**"Saved" string wrapped with `esc_html__()`:**
+- The API key confirmation label was hardcoded English, not i18n-wrapped
+
+**New files created:**
+- `readme.txt` — full WP.org-format readme
+- `uninstall.php` — deletes `lhsc_api_key`, `lhsc_threshold`, `lhsc_setup_done`, `lhsc_history`, and the `lhsc_update_notice` transient
+- `languages/` directory
+
+**`.gitignore` updated** — added wildcard pillar doc patterns
+
+---
 
 ## v1.0.0
 - Initial release
