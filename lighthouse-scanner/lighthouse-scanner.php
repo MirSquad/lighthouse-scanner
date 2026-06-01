@@ -3,7 +3,7 @@
  * Plugin Name:       Lighthouse Scanner
  * Plugin URI:        https://miriamschwab.me/plugins/lighthouse-scanner
  * Description:       Run PageSpeed Insights scans across your site. Tracks history, alerts on regressions, and copies reports for AI-assisted fixes. Exposes a REST API (lighthouse-scanner/v1) for AI agent integration.
- * Version:           2.2.0
+ * Version:           2.3.7
  * Author:            Miriam Schwab
  * Author URI:        https://miriamschwab.me
  * License:           GPL-2.0-or-later
@@ -22,7 +22,7 @@ add_action( 'init', function() {
 	load_plugin_textdomain( 'lighthouse-scanner', false, dirname( plugin_basename( __FILE__ ) ) . '/languages' );
 } );
 
-define( 'LHSC_VERSION',       '2.2.0' );
+define( 'LHSC_VERSION',       '2.3.7' );
 define( 'LHSC_FILE',          __FILE__ );
 define( 'LHSC_DIR',           plugin_dir_path( __FILE__ ) );
 define( 'LHSC_URL',           plugin_dir_url( __FILE__ ) );
@@ -30,6 +30,8 @@ define( 'LHSC_OPT_KEY',       'lhsc_api_key' );
 define( 'LHSC_OPT_THRESHOLD', 'lhsc_threshold' );
 define( 'LHSC_OPT_SETUP',     'lhsc_setup_done' );
 define( 'LHSC_OPT_HISTORY',   'lhsc_history' );
+
+require_once LHSC_DIR . 'includes/abilities.php';
 
 /* =============================================
    ADMIN MENU
@@ -42,6 +44,12 @@ add_action( 'admin_menu', function() {
 		'lighthouse-scanner',
 		'lhsc_render_page'
 	);
+} );
+
+add_filter( 'plugin_action_links_' . plugin_basename( LHSC_FILE ), function( $links ) {
+	$settings_link = '<a href="' . esc_url( admin_url( 'tools.php?page=lighthouse-scanner' ) ) . '">' . esc_html__( 'Settings', 'lighthouse-scanner' ) . '</a>';
+	array_unshift( $links, $settings_link );
+	return $links;
 } );
 
 /* =============================================
@@ -129,6 +137,9 @@ add_action( 'admin_init', function() {
 		'type'              => 'string',
 		'sanitize_callback' => 'lhsc_sanitize_api_key',
 		'default'           => '',
+	] );
+	register_setting( 'lhsc_settings', 'lhsc_write_abilities', [
+		'sanitize_callback' => 'rest_sanitize_boolean',
 	] );
 	register_setting( 'lhsc_settings', LHSC_OPT_THRESHOLD, [
 		'type'              => 'integer',
@@ -455,6 +466,14 @@ function lhsc_render_page() {
 								<input type="number" id="lhsc-threshold-input" name="<?php echo esc_attr( LHSC_OPT_THRESHOLD ); ?>" value="<?php echo esc_attr( $threshold ); ?>" min="0" max="100" style="width:64px" />
 								<span class="lhsc-hint"><?php esc_html_e( 'Scores below this are flagged red', 'lighthouse-scanner' ); ?></span>
 							</div>
+						</div>
+						<div class="lhsc-setting">
+							<label class="lhsc-label"><?php esc_html_e( 'Abilities API', 'lighthouse-scanner' ); ?></label>
+							<label>
+								<input type="checkbox" name="lhsc_write_abilities" value="1" <?php checked( 1, get_option( 'lhsc_write_abilities', 0 ) ); ?> />
+								<?php esc_html_e( 'Enable write abilities (clear history via AI agents)', 'lighthouse-scanner' ); ?>
+							</label>
+							<p class="lhsc-hint"><?php esc_html_e( 'Read access (settings, URLs, history) is always enabled. Requires WordPress 6.9+.', 'lighthouse-scanner' ); ?></p>
 						</div>
 						<?php submit_button( __( 'Save settings', 'lighthouse-scanner' ), 'secondary', 'submit', false ); ?>
 					</div>

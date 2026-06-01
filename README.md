@@ -65,3 +65,31 @@ Build the MCP server (one-time): `cd angie && npm install && npm run build`
 ## License
 
 GPL-2.0-or-later
+
+## WordPress Abilities API
+
+This plugin exposes abilities for the [WordPress Abilities API](https://developer.wordpress.org/apis/abilities-api/) (WordPress 6.9+), making it controllable by AI agents via the [MCP Adapter](https://github.com/WordPress/mcp-adapter) plugin.
+
+### Requirements
+
+- WordPress 6.9+
+- [MCP Adapter plugin](https://github.com/WordPress/mcp-adapter)
+
+### Available abilities
+
+| Ability | Access | Description |
+|---|---|---|
+| `lighthouse-scanner/get-settings` | Always on | Returns the score threshold, setup status, and whether a Google API key is saved |
+| `lighthouse-scanner/get-urls` | Always on | Returns the configured scan URL list with display labels |
+| `lighthouse-scanner/get-history` | Always on | Returns up to 20 scan entries, newest first, including scores and failing audits with resource-level details |
+| `lighthouse-scanner/run-scan` | Write (opt-in) | Kicks off a full PageSpeed Insights scan of all configured URLs in the background. Returns immediately — call `get-history` ~60 seconds later to retrieve results |
+
+### How `run-scan` works
+
+`run-scan` schedules the scan as a background job using WordPress's cron system and returns immediately without waiting. The plugin calls the Google PageSpeed Insights API server-side for each configured URL, parses scores and failing audits (including which specific resources are flagged), and saves the result to history in the same format as browser-triggered scans.
+
+Uses the stored Google API key if one is configured; falls back to unauthenticated requests otherwise.
+
+### Enabling write abilities
+
+Write abilities are disabled by default. To enable them, go to **Tools > Lighthouse Scanner**, check **Enable write abilities** in the Settings section, and save.

@@ -363,12 +363,25 @@
 				if ( ! a ) return;
 				if ( a.scoreDisplayMode === 'notApplicable' || a.scoreDisplayMode === 'informative' ) return;
 				if ( a.score === null || a.score === undefined || a.score >= 0.9 ) return;
+				// Capture up to 5 resource-level items for opportunity/table audits
+				// so we know exactly which images/scripts are flagged.
+				var items = [];
+				if ( a.details && Array.isArray( a.details.items ) ) {
+					items = a.details.items.slice( 0, 5 ).map( function ( item ) {
+						return {
+							url         : item.url || ( item.node && item.node.snippet ) || '',
+							wastedBytes : item.wastedBytes  || 0,
+							wastedMs    : item.wastedMs     || 0,
+						};
+					} ).filter( function ( item ) { return item.url || item.wastedBytes || item.wastedMs; } );
+				}
 				issues.push( {
 					category    : CAT[ catId ] || catId,
 					title       : a.title || '',
 					description : ( a.description || '' ).split( '.' )[ 0 ],
 					displayValue: a.displayValue || '',
-					score       : a.score
+					score       : a.score,
+					items       : items,
 				} );
 			} );
 		} );
@@ -405,11 +418,21 @@
 			body = '<p class="lhsc-no-issues">No failing audits.</p>';
 		} else {
 			body = r.issues.map( function ( iss ) {
+				var itemsHtml = '';
+				if ( iss.items && iss.items.length ) {
+					itemsHtml = '<ul class="lhsc-issue-items">' + iss.items.map( function ( item ) {
+						var savings = '';
+						if ( item.wastedBytes ) savings = ' (' + Math.round( item.wastedBytes / 1024 ) + ' KiB)';
+						else if ( item.wastedMs ) savings = ' (' + Math.round( item.wastedMs ) + ' ms)';
+						return '<li>' + escHtml( item.url ) + escHtml( savings ) + '</li>';
+					} ).join( '' ) + '</ul>';
+				}
 				return '<div class="lhsc-issue">'
 					+ '<div class="lhsc-issue-cat">' + escHtml( iss.category ) + '</div>'
 					+ '<div class="lhsc-issue-title">' + escHtml( iss.title )
 					+ ( iss.displayValue ? ' \u2014 ' + escHtml( iss.displayValue ) : '' ) + '</div>'
 					+ ( iss.description ? '<div class="lhsc-issue-desc">' + escHtml( iss.description ) + '</div>' : '' )
+					+ itemsHtml
 					+ '</div>';
 			} ).join( '' );
 		}

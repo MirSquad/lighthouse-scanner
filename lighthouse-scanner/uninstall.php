@@ -21,4 +21,5 @@ delete_option( 'lhsc_api_key' );
 delete_option( 'lhsc_threshold' );
 delete_option( 'lhsc_setup_done' );
 delete_option( 'lhsc_history' );
+delete_option( 'lhsc_write_abilities' );
 delete_transient( 'lhsc_update_notice' );
