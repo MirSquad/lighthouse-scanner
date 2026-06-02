@@ -3,7 +3,7 @@
  * Plugin Name:       Lighthouse Scanner
  * Plugin URI:        https://miriamschwab.me/plugins/lighthouse-scanner
  * Description:       Run PageSpeed Insights scans across your site. Tracks history, alerts on regressions, and copies reports for AI-assisted fixes. Exposes a REST API (lighthouse-scanner/v1) for AI agent integration.
- * Version:           2.3.7
+ * Version:           2.3.8
  * Author:            Miriam Schwab
  * Author URI:        https://miriamschwab.me
  * License:           GPL-2.0-or-later
@@ -22,7 +22,7 @@ add_action( 'init', function() {
 	load_plugin_textdomain( 'lighthouse-scanner', false, dirname( plugin_basename( __FILE__ ) ) . '/languages' );
 } );
 
-define( 'LHSC_VERSION',       '2.3.7' );
+define( 'LHSC_VERSION',       '2.3.8' );
 define( 'LHSC_FILE',          __FILE__ );
 define( 'LHSC_DIR',           plugin_dir_path( __FILE__ ) );
 define( 'LHSC_URL',           plugin_dir_url( __FILE__ ) );
@@ -471,7 +471,7 @@ function lhsc_render_page() {
 							<label class="lhsc-label"><?php esc_html_e( 'Abilities API', 'lighthouse-scanner' ); ?></label>
 							<label>
 								<input type="checkbox" name="lhsc_write_abilities" value="1" <?php checked( 1, get_option( 'lhsc_write_abilities', 0 ) ); ?> />
-								<?php esc_html_e( 'Enable write abilities (clear history via AI agents)', 'lighthouse-scanner' ); ?>
+								<?php esc_html_e( 'Enable write abilities (run scans via AI agents)', 'lighthouse-scanner' ); ?>
 							</label>
 							<p class="lhsc-hint"><?php esc_html_e( 'Read access (settings, URLs, history) is always enabled. Requires WordPress 6.9+.', 'lighthouse-scanner' ); ?></p>
 						</div>
