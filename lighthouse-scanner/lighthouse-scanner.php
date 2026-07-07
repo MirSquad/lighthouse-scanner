@@ -3,7 +3,7 @@
  * Plugin Name:       Lighthouse Scanner
  * Plugin URI:        https://miriamschwab.me/plugins/lighthouse-scanner
  * Description:       Run PageSpeed Insights scans across your site. Tracks history, alerts on regressions, and copies reports for AI-assisted fixes. Exposes a REST API (lighthouse-scanner/v1) for AI agent integration.
- * Version:           2.3.8
+ * Version:           2.3.10
  * Author:            Miriam Schwab
  * Author URI:        https://miriamschwab.me
  * License:           GPL-2.0-or-later
@@ -22,7 +22,7 @@ add_action( 'init', function() {
 	load_plugin_textdomain( 'lighthouse-scanner', false, dirname( plugin_basename( __FILE__ ) ) . '/languages' );
 } );
 
-define( 'LHSC_VERSION',       '2.3.8' );
+define( 'LHSC_VERSION',       '2.3.10' );
 define( 'LHSC_FILE',          __FILE__ );
 define( 'LHSC_DIR',           plugin_dir_path( __FILE__ ) );
 define( 'LHSC_URL',           plugin_dir_url( __FILE__ ) );
@@ -154,6 +154,30 @@ function lhsc_sanitize_api_key( $v ) {
 }
 
 /* =============================================
+   MIGRATIONS
+   ============================================= */
+// One-time cleanup: earlier versions could store scores as 0-100 percentages
+// (from external REST callers) instead of the expected 0-1 fraction, which
+// broke the score-delta display. Normalize any stored history once.
+add_action( 'admin_init', function() {
+	if ( get_option( 'lhsc_score_scale_fixed_v2' ) ) return;
+
+	$history = lhsc_get_history();
+	foreach ( $history as &$entry ) {
+		if ( empty( $entry['results'] ) || ! is_array( $entry['results'] ) ) continue;
+		foreach ( $entry['results'] as &$r ) {
+			$r['scores'] = array_map( 'lhsc_normalize_score', (array) ( $r['scores'] ?? [] ) );
+		}
+		unset( $r );
+	}
+	unset( $entry );
+
+	update_option( LHSC_OPT_HISTORY, $history, false );
+	update_option( 'lhsc_score_scale_fixed_v2', 1, false );
+	delete_option( 'lhsc_score_scale_fixed' ); // orphaned flag from the buggy first attempt
+} );
+
+/* =============================================
    UPDATE DETECTION
    ============================================= */
 add_action( 'upgrader_process_complete', function( $upgrader, $options ) {
@@ -274,7 +298,7 @@ add_action( 'wp_ajax_lhsc_save_history', function() {
 		$entry['results'][] = [
 			'url'    => esc_url_raw( $r['url'] ?? '' ),
 			'label'  => sanitize_text_field( $r['label'] ?? '' ),
-			'scores' => array_map( 'floatval', (array) ( $r['scores'] ?? [] ) ),
+			'scores' => array_map( 'lhsc_normalize_score', (array) ( $r['scores'] ?? [] ) ),
 			'issues' => array_slice( array_map( function( $i ) {
 				return [
 					'category'     => sanitize_text_field( $i['category'] ?? '' ),
@@ -314,6 +338,18 @@ function lhsc_get_api_key() {
 function lhsc_get_history() {
 	$h = get_option( LHSC_OPT_HISTORY, [] );
 	return is_array( $h ) ? $h : [];
+}
+
+/**
+ * Lighthouse category scores are a 0-1 fraction. Some external callers (e.g. an
+ * agent driving the REST /scan save endpoint) send 0-100 percentages instead —
+ * normalize those back to a fraction so history stays comparable across entries.
+ */
+function lhsc_normalize_score( $value ) {
+	if ( $value === null || $value === '' ) return null;
+	$v = (float) $value;
+	if ( $v > 1 ) $v = $v / 100;
+	return max( 0, min( 1, $v ) );
 }
 
 function lhsc_extract_prev_scores( $history ) {
@@ -758,7 +794,7 @@ add_action( 'rest_api_init', function() {
 				$entry['results'][] = [
 					'url'    => esc_url_raw( $r['url'] ?? '' ),
 					'label'  => sanitize_text_field( $r['label'] ?? '' ),
-					'scores' => array_map( 'floatval', (array) ( $r['scores'] ?? [] ) ),
+					'scores' => array_map( 'lhsc_normalize_score', (array) ( $r['scores'] ?? [] ) ),
 					'issues' => array_slice( array_map( function( $i ) {
 						return [
 							'category'     => sanitize_text_field( $i['category'] ?? '' ),

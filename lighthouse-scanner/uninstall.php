@@ -10,6 +10,7 @@
  *   lhsc_threshold    — Score alert threshold
  *   lhsc_setup_done   — First-run setup flag
  *   lhsc_history      — Scan history (up to 20 entries)
+ *   lhsc_score_scale_fixed_v2 — Migration flag for the 0-100/0-1 score scale fix
  *   lhsc_update_notice — Transient for regression alert notice
  */
 
@@ -22,4 +23,5 @@ delete_option( 'lhsc_threshold' );
 delete_option( 'lhsc_setup_done' );
 delete_option( 'lhsc_history' );
 delete_option( 'lhsc_write_abilities' );
+delete_option( 'lhsc_score_scale_fixed_v2' );
 delete_transient( 'lhsc_update_notice' );
