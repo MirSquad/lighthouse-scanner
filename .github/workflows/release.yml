@@ -1,0 +1,26 @@
+name: Release plugin zip
+
+on:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Build plugin zip
+        run: |
+          VERSION="${GITHUB_REF_NAME#v}"
+          git archive --format=zip --prefix=lighthouse-scanner/ HEAD:lighthouse-scanner -o "lighthouse-scanner-${VERSION}.zip"
+
+      - name: Create GitHub release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: lighthouse-scanner-*.zip
+          generate_release_notes: true
