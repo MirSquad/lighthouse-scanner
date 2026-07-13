@@ -217,8 +217,7 @@ function lhsc_register_abilities() {
 		),
 		'permission_callback' => fn() => current_user_can( 'manage_options' ),
 		'execute_callback'    => function( $input = null ) {
-			$history = lhsc_get_history();
-			return array_reverse( array_values( $history ) );
+			return array_values( lhsc_get_history() );
 		},
 		'meta' => array(
 			'mcp'        => array( 'public' => true ),

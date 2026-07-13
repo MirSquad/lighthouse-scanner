@@ -410,7 +410,7 @@ function lhsc_get_site_urls() {
 		'elementor_library', 'elementor_font', 'elementor_icons', 'elementor_snippet',
 		'e-floating-buttons', 'elementor_component',
 		// Other common plugin internals
-		'acf-field-group', 'acf-field', 'oembed_cache', 'wp_global_styles',
+		'acf-field-group', 'acf-field',
 	];
 
 	$cpts = get_post_types( [ 'public' => true ], 'objects' );
