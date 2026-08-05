@@ -3,7 +3,7 @@
  * Plugin Name:       Lighthouse Scanner
  * Plugin URI:        https://miriamschwab.me/plugins/lighthouse-scanner
  * Description:       Run PageSpeed Insights scans across your site. Tracks history, alerts on regressions, and copies reports for AI-assisted fixes. Exposes a REST API (lighthouse-scanner/v1) for AI agent integration.
- * Version:           2.3.10
+ * Version:           2.3.11
  * Author:            Miriam Schwab
  * Author URI:        https://miriamschwab.me
  * License:           GPL-2.0-or-later
@@ -12,190 +12,266 @@
  * Domain Path:       /languages
  * Requires at least: 5.9
  * Requires PHP:      7.4
+ *
+ * @package Lighthouse_Scanner
  */
 
 if ( ! defined( 'ABSPATH' ) ) {
 	exit;
 }
 
-add_action( 'init', function() {
-	load_plugin_textdomain( 'lighthouse-scanner', false, dirname( plugin_basename( __FILE__ ) ) . '/languages' );
-} );
+add_action(
+	'init',
+	function () {
+		load_plugin_textdomain( 'lighthouse-scanner', false, dirname( plugin_basename( __FILE__ ) ) . '/languages' );
+	}
+);
 
-define( 'LHSC_VERSION',       '2.3.10' );
-define( 'LHSC_FILE',          __FILE__ );
-define( 'LHSC_DIR',           plugin_dir_path( __FILE__ ) );
-define( 'LHSC_URL',           plugin_dir_url( __FILE__ ) );
-define( 'LHSC_OPT_KEY',       'lhsc_api_key' );
+define( 'LHSC_VERSION', '2.3.11' );
+define( 'LHSC_FILE', __FILE__ );
+define( 'LHSC_DIR', plugin_dir_path( __FILE__ ) );
+define( 'LHSC_URL', plugin_dir_url( __FILE__ ) );
+define( 'LHSC_OPT_KEY', 'lhsc_api_key' );
 define( 'LHSC_OPT_THRESHOLD', 'lhsc_threshold' );
-define( 'LHSC_OPT_SETUP',     'lhsc_setup_done' );
-define( 'LHSC_OPT_HISTORY',   'lhsc_history' );
+define( 'LHSC_OPT_SETUP', 'lhsc_setup_done' );
+define( 'LHSC_OPT_HISTORY', 'lhsc_history' );
 
 require_once LHSC_DIR . 'includes/abilities.php';
 
-/* =============================================
-   ADMIN MENU
-   ============================================= */
-add_action( 'admin_menu', function() {
-	add_management_page(
-		__( 'Lighthouse Scanner', 'lighthouse-scanner' ),
-		__( 'Lighthouse Scanner', 'lighthouse-scanner' ),
-		'manage_options',
-		'lighthouse-scanner',
-		'lhsc_render_page'
-	);
-} );
-
-add_filter( 'plugin_action_links_' . plugin_basename( LHSC_FILE ), function( $links ) {
-	$settings_link = '<a href="' . esc_url( admin_url( 'tools.php?page=lighthouse-scanner' ) ) . '">' . esc_html__( 'Settings', 'lighthouse-scanner' ) . '</a>';
-	array_unshift( $links, $settings_link );
-	return $links;
-} );
-
-/* =============================================
-   ENQUEUE — admin page only
-   ============================================= */
-add_action( 'admin_enqueue_scripts', function( $hook ) {
-	if ( 'tools_page_lighthouse-scanner' !== $hook ) return;
-
-	$history     = lhsc_get_history();
-	$prev_scores = lhsc_extract_prev_scores( $history );
-
-	$scan_url = '';
-	if ( ! empty( $_GET['lhsc_scan_url'] ) ) {
-		$scan_url = esc_url_raw( wp_unslash( $_GET['lhsc_scan_url'] ) );
+// ADMIN MENU.
+add_action(
+	'admin_menu',
+	function () {
+		add_management_page(
+			__( 'Lighthouse Scanner', 'lighthouse-scanner' ),
+			__( 'Lighthouse Scanner', 'lighthouse-scanner' ),
+			'manage_options',
+			'lighthouse-scanner',
+			'lhsc_render_page'
+		);
 	}
+);
 
-	$data = [
-		'urls'        => lhsc_get_site_urls(),
-		'apiKey'      => lhsc_get_api_key(),
-		'threshold'   => (int) get_option( LHSC_OPT_THRESHOLD, 85 ),
-		'setupDone'   => (bool) get_option( LHSC_OPT_SETUP, false ),
-		'history'     => $history,
-		'prevScores'  => $prev_scores,
-		'nonce'       => wp_create_nonce( 'lhsc_nonce' ),
-		'ajaxUrl'     => admin_url( 'admin-ajax.php' ),
-		'pluginPage'  => admin_url( 'tools.php?page=lighthouse-scanner' ),
-		'autoRun'     => isset( $_GET['lhsc_autorun'] ) && get_option( LHSC_OPT_SETUP ),
-		'scanThisUrl' => $scan_url,
-	];
-
-	// Inline CSS and JS directly into the page to bypass CDN caching of static assets
-	add_action( 'admin_head', function() {
-		echo '<style id="lhsc-admin-css">';
-		readfile( LHSC_DIR . 'assets/admin.css' );
-		echo '</style>';
-	} );
-
-	add_action( 'admin_footer', function() use ( $data ) {
-		echo '<script id="lhsc-admin-js">';
-		echo 'var lhscData=' . wp_json_encode( $data ) . ';';
-		readfile( LHSC_DIR . 'assets/admin.js' );
-		echo '</script>';
-	} );
-} );
-
-/* =============================================
-   ADMIN BAR MENU
-   ============================================= */
-add_action( 'admin_bar_menu', function( $bar ) {
-	if ( ! current_user_can( 'manage_options' ) ) return;
-
-	$plugin_url = esc_url( admin_url( 'tools.php?page=lighthouse-scanner' ) );
-
-	$bar->add_node( [
-		'id'    => 'lhsc-bar',
-		'title' => '&#9889; Scan',
-		'href'  => $plugin_url,
-		'meta'  => [ 'class' => 'lhsc-adminbar-top' ],
-	] );
-
-	// Scan this page — plain href link to plugin page, no frontend JS needed
-	if ( ! is_admin() ) {
-		$current_url = ( is_ssl() ? 'https://' : 'http://' ) . sanitize_text_field( wp_unslash( $_SERVER['HTTP_HOST'] ) ) . strtok( wp_unslash( $_SERVER['REQUEST_URI'] ), '?' );
-		$bar->add_node( [
-			'parent' => 'lhsc-bar',
-			'id'     => 'lhsc-bar-scan-page',
-			'title'  => __( 'Scan this page', 'lighthouse-scanner' ),
-			'href'   => esc_url( admin_url( 'tools.php?page=lighthouse-scanner&lhsc_scan_url=' . rawurlencode( $current_url ) ) ),
-		] );
+add_filter(
+	'plugin_action_links_' . plugin_basename( LHSC_FILE ),
+	function ( $links ) {
+		$settings_link = '<a href="' . esc_url( admin_url( 'tools.php?page=lighthouse-scanner' ) ) . '">' . esc_html__( 'Settings', 'lighthouse-scanner' ) . '</a>';
+		array_unshift( $links, $settings_link );
+		return $links;
 	}
+);
 
-	$bar->add_node( [
-		'parent' => 'lhsc-bar',
-		'id'     => 'lhsc-bar-goto',
-		'title'  => __( 'Go to Lighthouse Scanner', 'lighthouse-scanner' ),
-		'href'   => $plugin_url,
-	] );
-}, 100 );
+// ENQUEUE — admin page only.
+add_action(
+	'admin_enqueue_scripts',
+	function ( $hook ) {
+		if ( 'tools_page_lighthouse-scanner' !== $hook ) {
+			return;
+		}
 
-/* =============================================
-   SETTINGS
-   ============================================= */
-add_action( 'admin_init', function() {
-	register_setting( 'lhsc_settings', LHSC_OPT_KEY, [
-		'type'              => 'string',
-		'sanitize_callback' => 'lhsc_sanitize_api_key',
-		'default'           => '',
-	] );
-	register_setting( 'lhsc_settings', 'lhsc_write_abilities', [
-		'sanitize_callback' => 'rest_sanitize_boolean',
-	] );
-	register_setting( 'lhsc_settings', LHSC_OPT_THRESHOLD, [
-		'type'              => 'integer',
-		'sanitize_callback' => 'absint',
-		'default'           => 85,
-	] );
-} );
+		$history     = lhsc_get_history();
+		$prev_scores = lhsc_extract_prev_scores( $history );
 
+		// Read-only UI prefill from a query arg; no state change, so no nonce is required.
+		$scan_url = '';
+		// phpcs:ignore WordPress.Security.NonceVerification.Recommended
+		if ( ! empty( $_GET['lhsc_scan_url'] ) ) {
+			// phpcs:ignore WordPress.Security.NonceVerification.Recommended
+			$scan_url = esc_url_raw( wp_unslash( $_GET['lhsc_scan_url'] ) );
+		}
+
+		$data = array(
+			'urls'        => lhsc_get_site_urls(),
+			'apiKey'      => lhsc_get_api_key(),
+			'threshold'   => (int) get_option( LHSC_OPT_THRESHOLD, 85 ),
+			'setupDone'   => (bool) get_option( LHSC_OPT_SETUP, false ),
+			'history'     => $history,
+			'prevScores'  => $prev_scores,
+			'nonce'       => wp_create_nonce( 'lhsc_nonce' ),
+			'ajaxUrl'     => admin_url( 'admin-ajax.php' ),
+			'pluginPage'  => admin_url( 'tools.php?page=lighthouse-scanner' ),
+			// phpcs:ignore WordPress.Security.NonceVerification.Recommended
+			'autoRun'     => isset( $_GET['lhsc_autorun'] ) && get_option( LHSC_OPT_SETUP ),
+			'scanThisUrl' => $scan_url,
+		);
+
+		// Inline CSS and JS directly into the page to bypass CDN caching of static assets.
+		add_action(
+			'admin_head',
+			function () {
+				echo '<style id="lhsc-admin-css">';
+				// phpcs:ignore WordPress.WP.AlternativeFunctions.file_system_operations_readfile -- Inlining the plugin's own bundled CSS to bypass CDN caching; path is constant and trusted.
+				readfile( LHSC_DIR . 'assets/admin.css' );
+				echo '</style>';
+			}
+		);
+
+		add_action(
+			'admin_footer',
+			function () use ( $data ) {
+				echo '<script id="lhsc-admin-js">';
+				// nosemgrep: echoed-request -- Safe: JSON_HEX_* flags stop any value (incl. </script>, quotes, &) from breaking out of the inline script; data is admin-only.
+				echo 'var lhscData=' . wp_json_encode( $data, JSON_HEX_TAG | JSON_HEX_AMP | JSON_HEX_APOS | JSON_HEX_QUOT ) . ';';
+				// phpcs:ignore WordPress.WP.AlternativeFunctions.file_system_operations_readfile -- Inlining the plugin's own bundled JS to bypass CDN caching; path is constant and trusted.
+				readfile( LHSC_DIR . 'assets/admin.js' );
+				echo '</script>';
+			}
+		);
+	}
+);
+
+// ADMIN BAR MENU.
+add_action(
+	'admin_bar_menu',
+	function ( $bar ) {
+		if ( ! current_user_can( 'manage_options' ) ) {
+			return;
+		}
+
+		$plugin_url = esc_url( admin_url( 'tools.php?page=lighthouse-scanner' ) );
+
+		$bar->add_node(
+			array(
+				'id'    => 'lhsc-bar',
+				'title' => '&#9889; Scan',
+				'href'  => $plugin_url,
+				'meta'  => array( 'class' => 'lhsc-adminbar-top' ),
+			)
+		);
+
+		// Scan this page — plain href link to plugin page, no frontend JS needed.
+		if ( ! is_admin() ) {
+			$host        = isset( $_SERVER['HTTP_HOST'] ) ? sanitize_text_field( wp_unslash( $_SERVER['HTTP_HOST'] ) ) : '';
+			$request_uri = isset( $_SERVER['REQUEST_URI'] ) ? sanitize_text_field( wp_unslash( $_SERVER['REQUEST_URI'] ) ) : '';
+			$current_url = ( is_ssl() ? 'https://' : 'http://' ) . $host . strtok( $request_uri, '?' );
+			$bar->add_node(
+				array(
+					'parent' => 'lhsc-bar',
+					'id'     => 'lhsc-bar-scan-page',
+					'title'  => __( 'Scan this page', 'lighthouse-scanner' ),
+					'href'   => esc_url( admin_url( 'tools.php?page=lighthouse-scanner&lhsc_scan_url=' . rawurlencode( $current_url ) ) ),
+				)
+			);
+		}
+
+		$bar->add_node(
+			array(
+				'parent' => 'lhsc-bar',
+				'id'     => 'lhsc-bar-goto',
+				'title'  => __( 'Go to Lighthouse Scanner', 'lighthouse-scanner' ),
+				'href'   => $plugin_url,
+			)
+		);
+	},
+	100
+);
+
+// SETTINGS.
+add_action(
+	'admin_init',
+	function () {
+		register_setting(
+			'lhsc_settings',
+			LHSC_OPT_KEY,
+			array(
+				'type'              => 'string',
+				'sanitize_callback' => 'lhsc_sanitize_api_key',
+				'default'           => '',
+			)
+		);
+		register_setting(
+			'lhsc_settings',
+			'lhsc_write_abilities',
+			array(
+				'sanitize_callback' => 'rest_sanitize_boolean',
+			)
+		);
+		register_setting(
+			'lhsc_settings',
+			LHSC_OPT_THRESHOLD,
+			array(
+				'type'              => 'integer',
+				'sanitize_callback' => 'absint',
+				'default'           => 85,
+			)
+		);
+	}
+);
+
+/**
+ * Sanitize a PageSpeed Insights API key: trim to allowed characters, max 100 chars.
+ *
+ * @param mixed $v Raw API key value.
+ * @return string Sanitized key, or an empty string when it fails validation.
+ */
 function lhsc_sanitize_api_key( $v ) {
 	$v = sanitize_text_field( $v );
 	return preg_match( '/^[A-Za-z0-9_\-]{0,100}$/', $v ) ? $v : '';
 }
 
-/* =============================================
-   MIGRATIONS
-   ============================================= */
+// MIGRATIONS.
 // One-time cleanup: earlier versions could store scores as 0-100 percentages
 // (from external REST callers) instead of the expected 0-1 fraction, which
 // broke the score-delta display. Normalize any stored history once.
-add_action( 'admin_init', function() {
-	if ( get_option( 'lhsc_score_scale_fixed_v2' ) ) return;
-
-	$history = lhsc_get_history();
-	foreach ( $history as &$entry ) {
-		if ( empty( $entry['results'] ) || ! is_array( $entry['results'] ) ) continue;
-		foreach ( $entry['results'] as &$r ) {
-			$r['scores'] = array_map( 'lhsc_normalize_score', (array) ( $r['scores'] ?? [] ) );
+add_action(
+	'admin_init',
+	function () {
+		if ( get_option( 'lhsc_score_scale_fixed_v2' ) ) {
+			return;
 		}
-		unset( $r );
+
+		$history = lhsc_get_history();
+		foreach ( $history as &$entry ) {
+			if ( empty( $entry['results'] ) || ! is_array( $entry['results'] ) ) {
+				continue;
+			}
+			foreach ( $entry['results'] as &$r ) {
+				$r['scores'] = array_map( 'lhsc_normalize_score', (array) ( $r['scores'] ?? array() ) );
+			}
+			unset( $r );
+		}
+		unset( $entry );
+
+		update_option( LHSC_OPT_HISTORY, $history, false );
+		update_option( 'lhsc_score_scale_fixed_v2', 1, false );
+		delete_option( 'lhsc_score_scale_fixed' ); // orphaned flag from the buggy first attempt.
 	}
-	unset( $entry );
+);
 
-	update_option( LHSC_OPT_HISTORY, $history, false );
-	update_option( 'lhsc_score_scale_fixed_v2', 1, false );
-	delete_option( 'lhsc_score_scale_fixed' ); // orphaned flag from the buggy first attempt
-} );
+// UPDATE DETECTION.
+add_action(
+	'upgrader_process_complete',
+	function ( $upgrader, $options ) {
+		if ( ! in_array( $options['type'] ?? '', array( 'theme', 'plugin' ), true ) ) {
+			return;
+		}
+		set_transient( 'lhsc_update_notice', $options['type'], 7 * DAY_IN_SECONDS );
+	},
+	10,
+	2
+);
 
-/* =============================================
-   UPDATE DETECTION
-   ============================================= */
-add_action( 'upgrader_process_complete', function( $upgrader, $options ) {
-	if ( ! in_array( $options['type'] ?? '', [ 'theme', 'plugin' ], true ) ) return;
-	set_transient( 'lhsc_update_notice', $options['type'], 7 * DAY_IN_SECONDS );
-}, 10, 2 );
-
-add_action( 'admin_notices', function() {
-	if ( ! current_user_can( 'manage_options' ) ) return;
-	$type = get_transient( 'lhsc_update_notice' );
-	if ( ! $type ) return;
-	$scanner_url = esc_url( admin_url( 'tools.php?page=lighthouse-scanner&lhsc_autorun=1' ) );
-	$nonce       = wp_create_nonce( 'lhsc_nonce' );
-	$label       = $type === 'theme' ? __( 'theme', 'lighthouse-scanner' ) : __( 'plugin', 'lighthouse-scanner' );
-	?>
+add_action(
+	'admin_notices',
+	function () {
+		if ( ! current_user_can( 'manage_options' ) ) {
+			return;
+		}
+		$type = get_transient( 'lhsc_update_notice' );
+		if ( ! $type ) {
+			return;
+		}
+		$scanner_url = esc_url( admin_url( 'tools.php?page=lighthouse-scanner&lhsc_autorun=1' ) );
+		$nonce       = wp_create_nonce( 'lhsc_nonce' );
+		$label       = 'theme' === $type ? __( 'theme', 'lighthouse-scanner' ) : __( 'plugin', 'lighthouse-scanner' );
+		?>
 	<div class="notice notice-info lhsc-update-notice" id="lhsc-update-notice" style="display:flex;align-items:center;gap:12px;padding:10px 16px;">
 		<span>⚡ <strong><?php esc_html_e( 'Lighthouse Scanner:', 'lighthouse-scanner' ); ?></strong>
-		<?php printf( esc_html__( 'A %s was just updated. Run a scan to check for regressions.', 'lighthouse-scanner' ), esc_html( $label ) ); ?></span>
+		<?php
+		/* translators: %s: "theme" or "plugin". */
+		printf( esc_html__( 'A %s was just updated. Run a scan to check for regressions.', 'lighthouse-scanner' ), esc_html( $label ) );
+		?>
+		</span>
 		<a href="<?php echo esc_url( $scanner_url ); ?>" class="button button-small"><?php esc_html_e( 'Run scan now', 'lighthouse-scanner' ); ?></a>
 		<a href="#" class="lhsc-dismiss-btn" data-nonce="<?php echo esc_attr( $nonce ); ?>" data-ajax="<?php echo esc_url( admin_url( 'admin-ajax.php' ) ); ?>" style="color:#999;text-decoration:none;font-size:20px;line-height:1;margin-left:4px;" title="Dismiss">&times;</a>
 	</div>
@@ -210,237 +286,358 @@ add_action( 'admin_notices', function() {
 		});
 	})();
 	</script>
-	<?php
-} );
-
-add_action( 'wp_ajax_lhsc_dismiss_notice', function() {
-	check_ajax_referer( 'lhsc_nonce', 'nonce' );
-	if ( ! current_user_can( 'manage_options' ) ) wp_die( -1 );
-	delete_transient( 'lhsc_update_notice' );
-	wp_send_json_success();
-} );
-
-/* =============================================
-   AJAX: Complete setup
-   ============================================= */
-add_action( 'wp_ajax_lhsc_complete_setup', function() {
-	check_ajax_referer( 'lhsc_nonce', 'nonce' );
-	if ( ! current_user_can( 'manage_options' ) ) wp_die( -1 );
-	$auto = ! empty( $_POST['auto'] );
-	update_option( LHSC_OPT_SETUP, [ 'done' => true, 'auto' => $auto ], false );
-	// Save API key if provided during setup
-	if ( ! empty( $_POST['api_key'] ) ) {
-		$key = lhsc_sanitize_api_key( wp_unslash( $_POST['api_key'] ) );
-		if ( $key ) update_option( LHSC_OPT_KEY, $key, false );
+		<?php
 	}
-	wp_send_json_success();
-} );
+);
 
-/* =============================================
-   AJAX: Autocomplete post search
-   ============================================= */
-add_action( 'wp_ajax_lhsc_search_posts', function() {
-	check_ajax_referer( 'lhsc_nonce', 'nonce' );
-	if ( ! current_user_can( 'manage_options' ) ) wp_die( -1 );
-
-	$term = sanitize_text_field( wp_unslash( $_POST['term'] ?? '' ) );
-	if ( strlen( $term ) < 2 ) { wp_send_json_success( [] ); return; }
-
-	$viewable_types = array_values( array_filter(
-		get_post_types( [ 'public' => true ] ),
-		'is_post_type_viewable'
-	) );
-
-	$query = new WP_Query( [
-		'post_type'      => $viewable_types,
-		'post_status'    => 'publish',
-		's'              => $term,
-		'posts_per_page' => 8,
-		'no_found_rows'  => true,
-	] );
-
-	$results = [];
-	foreach ( $query->posts as $post ) {
-		$url = get_permalink( $post->ID );
-		if ( $url ) {
-			$pt_obj = get_post_type_object( $post->post_type );
-			$results[] = [
-				'title' => html_entity_decode( get_the_title( $post->ID ), ENT_QUOTES ),
-				'url'   => esc_url( $url ),
-				'type'  => $pt_obj ? $pt_obj->labels->singular_name : $post->post_type,
-			];
+add_action(
+	'wp_ajax_lhsc_dismiss_notice',
+	function () {
+		check_ajax_referer( 'lhsc_nonce', 'nonce' );
+		if ( ! current_user_can( 'manage_options' ) ) {
+			wp_die( '-1' );
 		}
+		delete_transient( 'lhsc_update_notice' );
+		wp_send_json_success();
 	}
+);
 
-	wp_send_json_success( $results );
-} );
-
-/* =============================================
-   AJAX: Save scan history
-   ============================================= */
-add_action( 'wp_ajax_lhsc_save_history', function() {
-	check_ajax_referer( 'lhsc_nonce', 'nonce' );
-	if ( ! current_user_can( 'manage_options' ) ) wp_die( -1 );
-
-	$raw  = wp_unslash( $_POST['scan'] ?? '' );
-	$scan = json_decode( $raw, true );
-	if ( ! is_array( $scan ) ) { wp_send_json_error( 'Invalid data' ); return; }
-
-	$entry = [
-		'id'        => sanitize_text_field( $scan['id'] ?? uniqid() ),
-		'date'      => sanitize_text_field( $scan['date'] ?? current_time( 'M j, Y' ) ),
-		'timestamp' => (int) ( $scan['timestamp'] ?? time() ),
-		'strategy'  => in_array( $scan['strategy'] ?? '', [ 'mobile', 'desktop' ], true ) ? $scan['strategy'] : 'mobile',
-		'results'   => [],
-	];
-
-	foreach ( (array) ( $scan['results'] ?? [] ) as $r ) {
-		$entry['results'][] = [
-			'url'    => esc_url_raw( $r['url'] ?? '' ),
-			'label'  => sanitize_text_field( $r['label'] ?? '' ),
-			'scores' => array_map( 'lhsc_normalize_score', (array) ( $r['scores'] ?? [] ) ),
-			'issues' => array_slice( array_map( function( $i ) {
-				return [
-					'category'     => sanitize_text_field( $i['category'] ?? '' ),
-					'title'        => sanitize_text_field( $i['title'] ?? '' ),
-					'description'  => sanitize_text_field( $i['description'] ?? '' ),
-					'displayValue' => sanitize_text_field( $i['displayValue'] ?? '' ),
-				];
-			}, (array) ( $r['issues'] ?? [] ) ), 0, 20 ),
-		];
+// AJAX: Complete setup.
+add_action(
+	'wp_ajax_lhsc_complete_setup',
+	function () {
+		check_ajax_referer( 'lhsc_nonce', 'nonce' );
+		if ( ! current_user_can( 'manage_options' ) ) {
+			wp_die( '-1' );
+		}
+		$auto = ! empty( $_POST['auto'] );
+		update_option(
+			LHSC_OPT_SETUP,
+			array(
+				'done' => true,
+				'auto' => $auto,
+			),
+			false
+		);
+		// Save API key if provided during setup.
+		if ( ! empty( $_POST['api_key'] ) ) {
+			$key = lhsc_sanitize_api_key( sanitize_text_field( wp_unslash( $_POST['api_key'] ) ) );
+			if ( $key ) {
+				update_option( LHSC_OPT_KEY, $key, false );
+			}
+		}
+		wp_send_json_success();
 	}
+);
 
-	$history = lhsc_get_history();
-	array_unshift( $history, $entry );
-	update_option( LHSC_OPT_HISTORY, array_slice( $history, 0, 20 ), false );
+// AJAX: Autocomplete post search.
+add_action(
+	'wp_ajax_lhsc_search_posts',
+	function () {
+		check_ajax_referer( 'lhsc_nonce', 'nonce' );
+		if ( ! current_user_can( 'manage_options' ) ) {
+			wp_die( '-1' );
+		}
 
-	wp_send_json_success();
-} );
+		$term = sanitize_text_field( wp_unslash( $_POST['term'] ?? '' ) );
+		if ( strlen( $term ) < 2 ) {
+			wp_send_json_success( array() );
+		}
 
-/* =============================================
-   AJAX: Clear history
-   ============================================= */
-add_action( 'wp_ajax_lhsc_clear_history', function() {
-	check_ajax_referer( 'lhsc_nonce', 'nonce' );
-	if ( ! current_user_can( 'manage_options' ) ) wp_die( -1 );
-	delete_option( LHSC_OPT_HISTORY );
-	wp_send_json_success();
-} );
+		$viewable_types = array_values(
+			array_filter(
+				get_post_types( array( 'public' => true ) ),
+				'is_post_type_viewable'
+			)
+		);
 
-/* =============================================
-   HELPERS
-   ============================================= */
+		$query = new WP_Query(
+			array(
+				'post_type'      => $viewable_types,
+				'post_status'    => 'publish',
+				's'              => $term,
+				'posts_per_page' => 8,
+				'no_found_rows'  => true,
+			)
+		);
+
+		$results = array();
+		foreach ( $query->posts as $post ) {
+			$url = get_permalink( $post->ID );
+			if ( $url ) {
+				$pt_obj    = get_post_type_object( $post->post_type );
+				$results[] = array(
+					'title' => html_entity_decode( get_the_title( $post->ID ), ENT_QUOTES ),
+					'url'   => esc_url( $url ),
+					'type'  => $pt_obj ? $pt_obj->labels->singular_name : $post->post_type,
+				);
+			}
+		}
+
+		wp_send_json_success( $results );
+	}
+);
+
+// AJAX: Save scan history.
+add_action(
+	'wp_ajax_lhsc_save_history',
+	function () {
+		check_ajax_referer( 'lhsc_nonce', 'nonce' );
+		if ( ! current_user_can( 'manage_options' ) ) {
+			wp_die( '-1' );
+		}
+
+		// $_POST['scan'] is a JSON blob; it is json_decoded below and every extracted field is
+		// individually sanitized. Sanitizing the raw JSON here would corrupt it.
+		$raw  = wp_unslash( $_POST['scan'] ?? '' ); // phpcs:ignore WordPress.Security.ValidatedSanitizedInput.InputNotSanitized
+		$scan = json_decode( $raw, true );
+		if ( ! is_array( $scan ) ) {
+			wp_send_json_error( 'Invalid data' );
+		}
+
+		$entry = array(
+			'id'        => sanitize_text_field( $scan['id'] ?? uniqid() ),
+			'date'      => sanitize_text_field( $scan['date'] ?? current_time( 'M j, Y' ) ),
+			'timestamp' => (int) ( $scan['timestamp'] ?? time() ),
+			'strategy'  => in_array( $scan['strategy'] ?? '', array( 'mobile', 'desktop' ), true ) ? $scan['strategy'] : 'mobile',
+			'results'   => array(),
+		);
+
+		foreach ( (array) ( $scan['results'] ?? array() ) as $r ) {
+			$entry['results'][] = array(
+				'url'    => esc_url_raw( $r['url'] ?? '' ),
+				'label'  => sanitize_text_field( $r['label'] ?? '' ),
+				'scores' => array_map( 'lhsc_normalize_score', (array) ( $r['scores'] ?? array() ) ),
+				'issues' => array_slice(
+					array_map(
+						function ( $i ) {
+							return array(
+								'category'     => sanitize_text_field( $i['category'] ?? '' ),
+								'title'        => sanitize_text_field( $i['title'] ?? '' ),
+								'description'  => sanitize_text_field( $i['description'] ?? '' ),
+								'displayValue' => sanitize_text_field( $i['displayValue'] ?? '' ),
+							);
+						},
+						(array) ( $r['issues'] ?? array() )
+					),
+					0,
+					20
+				),
+			);
+		}
+
+		$history = lhsc_get_history();
+		array_unshift( $history, $entry );
+		update_option( LHSC_OPT_HISTORY, array_slice( $history, 0, 20 ), false );
+
+		wp_send_json_success();
+	}
+);
+
+// AJAX: Clear history.
+add_action(
+	'wp_ajax_lhsc_clear_history',
+	function () {
+		check_ajax_referer( 'lhsc_nonce', 'nonce' );
+		if ( ! current_user_can( 'manage_options' ) ) {
+			wp_die( '-1' );
+		}
+		delete_option( LHSC_OPT_HISTORY );
+		wp_send_json_success();
+	}
+);
+
+// HELPERS.
+
+/**
+ * Get the stored PageSpeed Insights API key.
+ *
+ * @return string API key, or an empty string when none is stored.
+ */
 function lhsc_get_api_key() {
 	$k = get_option( LHSC_OPT_KEY, '' );
 	return is_string( $k ) ? $k : '';
 }
 
+/**
+ * Get the stored scan history.
+ *
+ * @return array<int, array<string, mixed>> History entries, newest first.
+ */
 function lhsc_get_history() {
-	$h = get_option( LHSC_OPT_HISTORY, [] );
-	return is_array( $h ) ? $h : [];
+	$h = get_option( LHSC_OPT_HISTORY, array() );
+	return is_array( $h ) ? $h : array();
 }
 
 /**
  * Lighthouse category scores are a 0-1 fraction. Some external callers (e.g. an
  * agent driving the REST /scan save endpoint) send 0-100 percentages instead —
  * normalize those back to a fraction so history stays comparable across entries.
+ *
+ * @param mixed $value Raw score value (fraction, percentage, null, or empty).
+ * @return float|null Normalized 0-1 score, or null when there is no value.
  */
 function lhsc_normalize_score( $value ) {
-	if ( $value === null || $value === '' ) return null;
+	if ( null === $value || '' === $value ) {
+		return null;
+	}
 	$v = (float) $value;
-	if ( $v > 1 ) $v = $v / 100;
+	if ( $v > 1 ) {
+		$v = $v / 100;
+	}
 	return max( 0, min( 1, $v ) );
 }
 
+/**
+ * Extract the previous run's per-URL scores from history, for delta display.
+ *
+ * @param array<int, array<string, mixed>> $history Scan history, newest first.
+ * @return array<string, mixed> Map of URL to its scores from the latest entry.
+ */
 function lhsc_extract_prev_scores( $history ) {
-	if ( empty( $history ) ) return [];
-	$prev = [];
-	foreach ( ( $history[0]['results'] ?? [] ) as $r ) {
-		if ( ! empty( $r['url'] ) ) $prev[ $r['url'] ] = $r['scores'] ?? [];
+	if ( empty( $history ) ) {
+		return array();
+	}
+	$prev = array();
+	foreach ( ( $history[0]['results'] ?? array() ) as $r ) {
+		if ( ! empty( $r['url'] ) ) {
+			$prev[ $r['url'] ] = $r['scores'] ?? array();
+		}
 	}
 	return $prev;
 }
 
+/**
+ * Build the list of site URLs offered for scanning (home, pages, posts page).
+ *
+ * @return array<int, array{url: string, label: string}> Scannable URLs with labels.
+ */
 function lhsc_get_site_urls() {
-	$urls     = [];
+	$urls     = array();
 	$front_id = (int) get_option( 'page_on_front' );
 	$posts_id = (int) get_option( 'page_for_posts' );
 
-	// Homepage
-	$urls[] = [ 'url' => esc_url( home_url('/') ), 'label' => 'Home' ];
+	// Homepage.
+	$urls[] = array(
+		'url'   => esc_url( home_url( '/' ) ),
+		'label' => 'Home',
+	);
 
-	// Top-level pages (no parent), exclude front + posts page
-	$pages = get_pages( [
-		'post_status' => 'publish',
-		'parent'      => 0,
-		'sort_column' => 'menu_order',
-		'exclude'     => array_filter( [ $front_id, $posts_id ] ),
-	] );
+	// Top-level pages (no parent), exclude front + posts page.
+	$pages = get_pages(
+		array(
+			'post_status' => 'publish',
+			'parent'      => 0,
+			'sort_column' => 'menu_order',
+			'exclude'     => array_filter( array( $front_id, $posts_id ) ),
+		)
+	);
 	foreach ( $pages as $page ) {
-		$urls[] = [
+		$urls[] = array(
 			'url'   => esc_url( get_permalink( $page->ID ) ),
 			'label' => html_entity_decode( get_the_title( $page->ID ), ENT_QUOTES ),
-		];
+		);
 	}
 
-	// Posts/writing page
+	// Posts/writing page.
 	if ( $posts_id ) {
-		$urls[] = [
+		$urls[] = array(
 			'url'   => esc_url( get_permalink( $posts_id ) ),
 			'label' => html_entity_decode( get_the_title( $posts_id ), ENT_QUOTES ),
-		];
+		);
 	}
 
-	// Latest blog post
-	$posts = get_posts( [ 'numberposts' => 1, 'post_status' => 'publish', 'post_type' => 'post' ] );
+	// Latest blog post.
+	$posts = get_posts(
+		array(
+			'numberposts' => 1,
+			'post_status' => 'publish',
+			'post_type'   => 'post',
+		)
+	);
 	if ( $posts ) {
-		$urls[] = [
+		$urls[] = array(
 			'url'   => esc_url( get_permalink( $posts[0]->ID ) ),
 			'label' => 'Post: ' . html_entity_decode( get_the_title( $posts[0]->ID ), ENT_QUOTES ),
-		];
+		);
 	}
 
-	// Latest from each publicly viewable CPT (exclude built-ins)
-	$builtin = [
-		// WordPress core
-		'post', 'page', 'attachment', 'revision', 'nav_menu_item', 'custom_css',
-		'customize_changeset', 'oembed_cache', 'user_request', 'wp_block',
-		'wp_template', 'wp_template_part', 'wp_global_styles', 'wp_navigation',
-		// Elementor internal
-		'elementor_library', 'elementor_font', 'elementor_icons', 'elementor_snippet',
-		'e-floating-buttons', 'elementor_component',
-		// Other common plugin internals
-		'acf-field-group', 'acf-field', 'oembed_cache', 'wp_global_styles',
-	];
+	// Latest from each publicly viewable CPT (exclude built-ins).
+	$builtin = array(
+		// WordPress core.
+		'post',
+		'page',
+		'attachment',
+		'revision',
+		'nav_menu_item',
+		'custom_css',
+		'customize_changeset',
+		'oembed_cache',
+		'user_request',
+		'wp_block',
+		'wp_template',
+		'wp_template_part',
+		'wp_global_styles',
+		'wp_navigation',
+		// Elementor internal.
+		'elementor_library',
+		'elementor_font',
+		'elementor_icons',
+		'elementor_snippet',
+		'e-floating-buttons',
+		'elementor_component',
+		// Other common plugin internals.
+		'acf-field-group',
+		'acf-field',
+		'oembed_cache',
+		'wp_global_styles',
+	);
 
-	$cpts = get_post_types( [ 'public' => true ], 'objects' );
+	$cpts = get_post_types( array( 'public' => true ), 'objects' );
 	foreach ( $cpts as $cpt ) {
-		if ( in_array( $cpt->name, $builtin, true ) ) continue;
-		if ( ! is_post_type_viewable( $cpt->name ) ) continue;
-		$latest = get_posts( [ 'numberposts' => 1, 'post_status' => 'publish', 'post_type' => $cpt->name ] );
+		if ( in_array( $cpt->name, $builtin, true ) ) {
+			continue;
+		}
+		if ( ! is_post_type_viewable( $cpt->name ) ) {
+			continue;
+		}
+		$latest = get_posts(
+			array(
+				'numberposts' => 1,
+				'post_status' => 'publish',
+				'post_type'   => $cpt->name,
+			)
+		);
 		if ( $latest ) {
-			$urls[] = [
+			$urls[] = array(
 				'url'   => esc_url( get_permalink( $latest[0]->ID ) ),
 				'label' => $cpt->labels->singular_name . ': ' . html_entity_decode( get_the_title( $latest[0]->ID ), ENT_QUOTES ),
-			];
+			);
 		}
 	}
 
 	return $urls;
 }
 
-/* =============================================
-   RENDER PAGE
-   ============================================= */
+// RENDER PAGE.
+
+/**
+ * Render the Lighthouse Scanner admin page.
+ *
+ * @return void
+ */
 function lhsc_render_page() {
-	if ( ! current_user_can( 'manage_options' ) ) wp_die( esc_html__( 'Access denied.', 'lighthouse-scanner' ) );
+	if ( ! current_user_can( 'manage_options' ) ) {
+		wp_die( esc_html__( 'Access denied.', 'lighthouse-scanner' ) );
+	}
 	settings_errors( LHSC_OPT_KEY );
 	$api_key   = lhsc_get_api_key();
 	$threshold = (int) get_option( LHSC_OPT_THRESHOLD, 85 );
 	$setup     = get_option( LHSC_OPT_SETUP, false );
 	// Capture the scan URL from the admin-bar link for the "Scanning…" notice.
-	$scan_url  = '';
+	$scan_url = '';
 	if ( ! empty( $_GET['lhsc_scan_url'] ) ) { // phpcs:ignore WordPress.Security.NonceVerification.Recommended -- Read-only URL passed from admin-bar "Scan this page" link. No state change.
+		// phpcs:ignore WordPress.Security.NonceVerification.Recommended -- Read-only URL prefill; no state change.
 		$scan_url = esc_url_raw( wp_unslash( $_GET['lhsc_scan_url'] ) );
 	}
 	?>
@@ -482,7 +679,12 @@ function lhsc_render_page() {
 		</div>
 		<?php endif; ?>
 
-		<div id="lhsc-main"<?php if ( ! $setup ) echo ' style="display:none"'; ?>>
+		<div id="lhsc-main"
+		<?php
+		if ( ! $setup ) {
+			echo ' style="display:none"';}
+		?>
+			>
 
 			<!-- Settings -->
 			<div class="lhsc-card lhsc-card--settings">
@@ -493,13 +695,16 @@ function lhsc_render_page() {
 							<label class="lhsc-label" for="lhsc-api-key-input"><?php esc_html_e( 'Google API Key', 'lighthouse-scanner' ); ?></label>
 							<div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;">
 								<input type="password" id="lhsc-api-key-input" name="<?php echo esc_attr( LHSC_OPT_KEY ); ?>" value="<?php echo esc_attr( $api_key ); ?>" class="regular-text" autocomplete="off" placeholder="<?php esc_attr_e( 'Paste key here', 'lighthouse-scanner' ); ?>" />
-								<?php if ( $api_key ) echo '<span class="lhsc-key-saved">&#10003; ' . esc_html__( 'Saved', 'lighthouse-scanner' ) . '</span>'; ?>
+								<?php
+								if ( $api_key ) {
+									echo '<span class="lhsc-key-saved">&#10003; ' . esc_html__( 'Saved', 'lighthouse-scanner' ) . '</span>';}
+								?>
 							</div>
 						</div>
 						<div class="lhsc-setting">
 							<label class="lhsc-label" for="lhsc-threshold-input"><?php esc_html_e( 'Alert below', 'lighthouse-scanner' ); ?></label>
 							<div style="display:flex;align-items:center;gap:8px;">
-								<input type="number" id="lhsc-threshold-input" name="<?php echo esc_attr( LHSC_OPT_THRESHOLD ); ?>" value="<?php echo esc_attr( $threshold ); ?>" min="0" max="100" style="width:64px" />
+								<input type="number" id="lhsc-threshold-input" name="<?php echo esc_attr( LHSC_OPT_THRESHOLD ); ?>" value="<?php echo esc_attr( (string) $threshold ); ?>" min="0" max="100" style="width:64px" />
 								<span class="lhsc-hint"><?php esc_html_e( 'Scores below this are flagged red', 'lighthouse-scanner' ); ?></span>
 							</div>
 						</div>
@@ -521,7 +726,12 @@ function lhsc_render_page() {
 				<p class="lhsc-intro"><?php esc_html_e( 'Run Google PageSpeed Insights on your pages. Copy results to Claude for theme fixes.', 'lighthouse-scanner' ); ?></p>
 				<?php if ( ! empty( $scan_url ) ) : ?>
 				<div class="notice notice-info inline" style="margin:0 0 12px;padding:8px 14px">
-					<p style="margin:0">⚡ <?php printf( esc_html__( 'Scanning %s&hellip;', 'lighthouse-scanner' ), '<strong>' . esc_html( $scan_url ) . '</strong>' ); ?></p>
+					<p style="margin:0">⚡
+						<?php
+						/* translators: %s: URL being scanned. */
+						printf( esc_html__( 'Scanning %s&hellip;', 'lighthouse-scanner' ), '<strong>' . esc_html( $scan_url ) . '</strong>' );
+						?>
+					</p>
 				</div>
 				<?php endif; ?>
 				<div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-bottom:14px;padding-bottom:14px;border-bottom:1px solid #f0f0f1">
@@ -562,318 +772,389 @@ function lhsc_render_page() {
 	<?php
 }
 
-/* =============================================
-   REST API
-   Exposes plugin capabilities for AI agents and
-   external tools. All endpoints require the
-   manage_options capability (site admins only).
+// REST API.
+// Exposes plugin capabilities for AI agents and.
+// external tools. All endpoints require the.
+// manage_options capability (site admins only).
+// Namespace: lighthouse-scanner/v1.
+// GET  /urls          — list all tracked URLs.
+// GET  /history       — scan history with scores and issues.
+// GET  /history/{id}  — single scan entry by ID.
+// POST /scan          — trigger a PageSpeed scan.
+// DELETE /history     — clear all history.
+// Authentication: WordPress application passwords.
+// (Dashboard → Users → Edit → Application Passwords).
+// Compatible with WordPress MCP when available.
+add_action(
+	'rest_api_init',
+	function () {
 
-   Namespace: lighthouse-scanner/v1
+		$ns = 'lighthouse-scanner/v1';
 
-   GET  /urls          — list all tracked URLs
-   GET  /history       — scan history with scores and issues
-   GET  /history/{id}  — single scan entry by ID
-   POST /scan          — trigger a PageSpeed scan
-   DELETE /history     — clear all history
-
-   Authentication: WordPress application passwords
-   (Dashboard → Users → Edit → Application Passwords).
-   Compatible with WordPress MCP when available.
-   ============================================= */
-add_action( 'rest_api_init', function() {
-
-	$ns = 'lighthouse-scanner/v1';
-
-	/* ------------------------------------------
-	   Permission callback — all endpoints share this.
-	   Requires manage_options (admins only).
-	   ------------------------------------------ */
-	$auth = function() {
-		return current_user_can( 'manage_options' )
+		/*
+		------------------------------------------
+		Permission callback — all endpoints share this.
+		Requires manage_options (admins only).
+		------------------------------------------
+		*/
+		$auth = function () {
+			return current_user_can( 'manage_options' )
 			? true
 			: new WP_Error(
 				'rest_forbidden',
 				__( 'You do not have permission to access Lighthouse Scanner data.', 'lighthouse-scanner' ),
-				[ 'status' => 403 ]
+				array( 'status' => 403 )
 			);
-	};
+		};
 
-	/* ------------------------------------------
-	   GET /urls
-	   Returns the same URL list the admin UI uses.
-	   Useful for an AI agent to discover which
-	   pages exist before requesting a scan.
+		/*
+		------------------------------------------
+		GET /urls
+		Returns the same URL list the admin UI uses.
+		Useful for an AI agent to discover which
+		pages exist before requesting a scan.
 
-	   Response:
-	   [
-	     { "url": "https://example.com/", "label": "Home" },
-	     { "url": "https://example.com/about/", "label": "About" },
-	     ...
-	   ]
-	   ------------------------------------------ */
-	register_rest_route( $ns, '/urls', [
-		'methods'             => 'GET',
-		'callback'            => function() {
-			return rest_ensure_response( lhsc_get_site_urls() );
-		},
-		'permission_callback' => $auth,
-	] );
+		Response:
+		[
+		{ "url": "https://example.com/", "label": "Home" },
+		{ "url": "https://example.com/about/", "label": "About" },
+		...
+		]
+		------------------------------------------
+		*/
+		register_rest_route(
+			$ns,
+			'/urls',
+			array(
+				'methods'             => 'GET',
+				'callback'            => function () {
+					return rest_ensure_response( lhsc_get_site_urls() );
+				},
+				'permission_callback' => $auth,
+			)
+		);
 
-	/* ------------------------------------------
-	   GET /history
-	   Returns up to 20 most recent scan entries.
-	   Optional query params:
-	     ?limit=5          — max entries to return (1–20)
-	     ?strategy=mobile  — filter by strategy
-	     ?url=https://...  — filter results to one URL
+		// phpcs:disable Squiz.PHP.CommentedOutCode.Found -- The block below is a JSON response example in docs, not code.
 
-	   Response:
-	   [
-	     {
-	       "id": "abc123",
-	       "date": "Mar 22, 2026",
-	       "timestamp": 1742600000,
-	       "strategy": "mobile",
-	       "results": [
-	         {
-	           "url": "https://example.com/",
-	           "label": "Home",
-	           "scores": {
-	             "performance": 91,
-	             "accessibility": 100,
-	             "best-practices": 100,
-	             "seo": 100
-	           },
-	           "issues": [
-	             {
-	               "category": "Performance",
-	               "title": "Reduce unused JavaScript",
-	               "description": "...",
-	               "displayValue": "Est savings of 61 KiB"
-	             }
-	           ]
-	         }
-	       ]
-	     }
-	   ]
-	   ------------------------------------------ */
-	register_rest_route( $ns, '/history', [
-		'methods'             => 'GET',
-		'callback'            => function( WP_REST_Request $req ) {
-			$history  = lhsc_get_history();
-			$limit    = min( 20, max( 1, (int) ( $req->get_param( 'limit' ) ?? 20 ) ) );
-			$strategy = sanitize_text_field( $req->get_param( 'strategy' ) ?? '' );
-			$url      = esc_url_raw( $req->get_param( 'url' ) ?? '' );
+		/*
+		------------------------------------------
+		GET /history
+		Returns up to 20 most recent scan entries.
+		Optional query params:
+		?limit=5          — max entries to return (1–20)
+		?strategy=mobile  — filter by strategy
+		?url=https://...  — filter results to one URL
 
-			// Filter by strategy if provided
-			if ( $strategy ) {
-				$history = array_values( array_filter( $history, function( $e ) use ( $strategy ) { return $e['strategy'] === $strategy; } ) );
+		Response:
+		[
+		{
+			"id": "abc123",
+			"date": "Mar 22, 2026",
+			"timestamp": 1742600000,
+			"strategy": "mobile",
+			"results": [
+			{
+				"url": "https://example.com/",
+				"label": "Home",
+				"scores": {
+				"performance": 91,
+				"accessibility": 100,
+				"best-practices": 100,
+				"seo": 100
+				},
+				"issues": [
+				{
+					"category": "Performance",
+					"title": "Reduce unused JavaScript",
+					"description": "...",
+					"displayValue": "Est savings of 61 KiB"
+				}
+				]
 			}
+			]
+		}
+		]
+		------------------------------------------
+		*/
+		// phpcs:enable Squiz.PHP.CommentedOutCode.Found
+		register_rest_route(
+			$ns,
+			'/history',
+			array(
+				'methods'             => 'GET',
+				'callback'            => function ( WP_REST_Request $req ) {
+					$history  = lhsc_get_history();
+					$limit    = min( 20, max( 1, (int) ( $req->get_param( 'limit' ) ?? 20 ) ) );
+					$strategy = sanitize_text_field( $req->get_param( 'strategy' ) ?? '' );
+					$url      = esc_url_raw( $req->get_param( 'url' ) ?? '' );
 
-			$history = array_slice( $history, 0, $limit );
+					// Filter by strategy if provided.
+					if ( $strategy ) {
+						$history = array_values(
+							array_filter(
+								$history,
+								function ( $e ) use ( $strategy ) {
+									return $e['strategy'] === $strategy;
+								}
+							)
+						);
+					}
 
-			// Filter results to one URL if requested
-			if ( $url ) {
-				foreach ( $history as &$entry ) {
-					$entry['results'] = array_values(
-						array_filter( $entry['results'], function( $r ) use ( $url ) { return $r['url'] === $url; } )
+					$history = array_slice( $history, 0, $limit );
+
+					// Filter results to one URL if requested.
+					if ( $url ) {
+						foreach ( $history as &$entry ) {
+							$entry['results'] = array_values(
+								array_filter(
+									$entry['results'],
+									function ( $r ) use ( $url ) {
+										return $r['url'] === $url; }
+								)
+							);
+						}
+						unset( $entry );
+					}
+
+					return rest_ensure_response( $history );
+				},
+				'permission_callback' => $auth,
+				'args'                => array(
+					'limit'    => array(
+						'type'    => 'integer',
+						'minimum' => 1,
+						'maximum' => 20,
+					),
+					'strategy' => array(
+						'type' => 'string',
+						'enum' => array( 'mobile', 'desktop' ),
+					),
+					'url'      => array(
+						'type'   => 'string',
+						'format' => 'uri',
+					),
+				),
+			)
+		);
+
+		/*
+		------------------------------------------
+		GET /history/{id}
+		Returns a single scan entry by its ID.
+		Useful for an AI agent to retrieve a
+		specific scan it triggered via POST /scan.
+		------------------------------------------
+		*/
+		register_rest_route(
+			$ns,
+			'/history/(?P<id>[a-zA-Z0-9_\-]+)',
+			array(
+				'methods'             => 'GET',
+				'callback'            => function ( WP_REST_Request $req ) {
+					$id      = sanitize_text_field( $req->get_param( 'id' ) );
+					$history = lhsc_get_history();
+					foreach ( $history as $entry ) {
+						if ( ( $entry['id'] ?? '' ) === $id ) {
+							return rest_ensure_response( $entry );
+						}
+					}
+					return new WP_Error( 'not_found', 'Scan not found.', array( 'status' => 404 ) );
+				},
+				'permission_callback' => $auth,
+			)
+		);
+
+		/*
+		------------------------------------------
+		POST /scan
+		Triggers a PageSpeed Insights scan and
+		stores the results in history.
+
+		The actual PageSpeed API call happens in the
+		browser (JS) in the admin UI, because the
+		Google API key is only exposed client-side.
+		This endpoint instead accepts completed scan
+		results and saves them — matching the same
+		flow as lhsc_save_history AJAX handler.
+
+		If called with just { "trigger": true }, it
+		returns the list of URLs and API key hint so
+		an AI agent or automation tool can perform
+		the scan itself and POST the results back.
+
+		Request body (application/json):
+		{
+		"trigger": true
+		}
+		— or —
+		{
+		"id": "abc123",
+		"date": "Mar 22, 2026",
+		"timestamp": 1742600000,
+		"strategy": "mobile",
+		"results": [ ... ]
+		}
+
+		Response (trigger mode):
+		{
+		"action": "scan_required",
+		"urls": [ ... ],
+		"api_key_configured": true,
+		"strategy": "mobile",
+		"message": "Perform PageSpeed scans on the provided URLs..."
+		}
+
+		Response (save mode):
+		{
+		"id": "abc123",
+		"saved": true,
+		"results_count": 7
+		}
+		------------------------------------------
+		*/
+		register_rest_route(
+			$ns,
+			'/scan',
+			array(
+				'methods'             => 'POST',
+				'callback'            => function ( WP_REST_Request $req ) {
+					$body = $req->get_json_params();
+
+					// Trigger mode — return URLs and config so caller can run the scan.
+					if ( ! empty( $body['trigger'] ) ) {
+						return rest_ensure_response(
+							array(
+								'action'             => 'scan_required',
+								'urls'               => lhsc_get_site_urls(),
+								'api_key_configured' => ! empty( lhsc_get_api_key() ),
+								'strategy'           => 'mobile',
+								'pagespeed_api'      => 'https://www.googleapis.com/pagespeedonline/v5/runPagespeed',
+								'message'            => 'Perform PageSpeed Insights scans on each URL using the API, then POST the results back to this endpoint in the standard scan format.',
+							)
+						);
+					}
+
+					// Save mode — accept and store completed scan results.
+					if ( empty( $body['results'] ) || ! is_array( $body['results'] ) ) {
+						return new WP_Error( 'invalid_data', 'Missing results array.', array( 'status' => 400 ) );
+					}
+
+					$entry = array(
+						'id'        => sanitize_text_field( $body['id'] ?? uniqid( 'rest_' ) ),
+						'date'      => sanitize_text_field( $body['date'] ?? current_time( 'M j, Y' ) ),
+						'timestamp' => (int) ( $body['timestamp'] ?? time() ),
+						'strategy'  => in_array( $body['strategy'] ?? '', array( 'mobile', 'desktop' ), true )
+							? $body['strategy'] : 'mobile',
+						'results'   => array(),
 					);
-				}
-				unset( $entry );
-			}
 
-			return rest_ensure_response( $history );
-		},
-		'permission_callback' => $auth,
-		'args'                => [
-			'limit'    => [ 'type' => 'integer', 'minimum' => 1, 'maximum' => 20 ],
-			'strategy' => [ 'type' => 'string',  'enum' => [ 'mobile', 'desktop' ] ],
-			'url'      => [ 'type' => 'string',  'format' => 'uri' ],
-		],
-	] );
+					foreach ( (array) $body['results'] as $r ) {
+						$entry['results'][] = array(
+							'url'    => esc_url_raw( $r['url'] ?? '' ),
+							'label'  => sanitize_text_field( $r['label'] ?? '' ),
+							'scores' => array_map( 'lhsc_normalize_score', (array) ( $r['scores'] ?? array() ) ),
+							'issues' => array_slice(
+								array_map(
+									function ( $i ) {
+										return array(
+											'category'     => sanitize_text_field( $i['category'] ?? '' ),
+											'title'        => sanitize_text_field( $i['title'] ?? '' ),
+											'description'  => sanitize_text_field( $i['description'] ?? '' ),
+											'displayValue' => sanitize_text_field( $i['displayValue'] ?? '' ),
+										);
+									},
+									(array) ( $r['issues'] ?? array() )
+								),
+								0,
+								20
+							),
+						);
+					}
 
-	/* ------------------------------------------
-	   GET /history/{id}
-	   Returns a single scan entry by its ID.
-	   Useful for an AI agent to retrieve a
-	   specific scan it triggered via POST /scan.
-	   ------------------------------------------ */
-	register_rest_route( $ns, '/history/(?P<id>[a-zA-Z0-9_\-]+)', [
-		'methods'             => 'GET',
-		'callback'            => function( WP_REST_Request $req ) {
-			$id      = sanitize_text_field( $req->get_param( 'id' ) );
-			$history = lhsc_get_history();
-			foreach ( $history as $entry ) {
-				if ( ( $entry['id'] ?? '' ) === $id ) {
-					return rest_ensure_response( $entry );
-				}
-			}
-			return new WP_Error( 'not_found', 'Scan not found.', [ 'status' => 404 ] );
-		},
-		'permission_callback' => $auth,
-	] );
+					$history = lhsc_get_history();
+					array_unshift( $history, $entry );
+					update_option( LHSC_OPT_HISTORY, array_slice( $history, 0, 20 ), false );
 
-	/* ------------------------------------------
-	   POST /scan
-	   Triggers a PageSpeed Insights scan and
-	   stores the results in history.
+					return rest_ensure_response(
+						array(
+							'id'            => $entry['id'],
+							'saved'         => true,
+							'results_count' => count( $entry['results'] ),
+						)
+					);
+				},
+				'permission_callback' => $auth,
+			)
+		);
 
-	   The actual PageSpeed API call happens in the
-	   browser (JS) in the admin UI, because the
-	   Google API key is only exposed client-side.
-	   This endpoint instead accepts completed scan
-	   results and saves them — matching the same
-	   flow as lhsc_save_history AJAX handler.
+		/*
+		------------------------------------------
+		DELETE /history
+		Clears all stored scan history.
+		------------------------------------------
+		*/
+		register_rest_route(
+			$ns,
+			'/history',
+			array(
+				'methods'             => 'DELETE',
+				'callback'            => function () {
+					delete_option( LHSC_OPT_HISTORY );
+					return rest_ensure_response( array( 'cleared' => true ) );
+				},
+				'permission_callback' => $auth,
+			)
+		);
+	}
+);
 
-	   If called with just { "trigger": true }, it
-	   returns the list of URLs and API key hint so
-	   an AI agent or automation tool can perform
-	   the scan itself and POST the results back.
+// ANGIE MCP SERVER.
+// Enqueues the compiled Angie MCP server JS on.
+// admin pages where Angie is active.
+// The JS at angie/dist/mcp-server.js registers.
+// three tools with Angie:.
+// - get-lighthouse-urls.
+// - get-lighthouse-history.
+// - run-lighthouse-scan.
+// BUILD INSTRUCTIONS (one-time, needs Node.js):.
+// cd wp-content/plugins/lighthouse-scanner/angie.
+// npm install.
+// npm run build.
+// This produces angie/dist/mcp-server.js which.
+// WordPress loads automatically on admin pages.
+add_action(
+	'admin_enqueue_scripts',
+	function () {
+		$dist = plugin_dir_path( __FILE__ ) . 'angie/dist/mcp-server.js';
 
-	   Request body (application/json):
-	   {
-	     "trigger": true
-	   }
-	   — or —
-	   {
-	     "id": "abc123",
-	     "date": "Mar 22, 2026",
-	     "timestamp": 1742600000,
-	     "strategy": "mobile",
-	     "results": [ ... ]
-	   }
+		// Only load if built file exists.
+		if ( ! file_exists( $dist ) ) {
+			return;
+		}
 
-	   Response (trigger mode):
-	   {
-	     "action": "scan_required",
-	     "urls": [ ... ],
-	     "api_key_configured": true,
-	     "strategy": "mobile",
-	     "message": "Perform PageSpeed scans on the provided URLs..."
-	   }
+		// Only load if Elementor is active (Angie lives inside Elementor).
+		if ( ! defined( 'ELEMENTOR_VERSION' ) && ! class_exists( 'Elementor\\Plugin' ) ) {
+			return;
+		}
 
-	   Response (save mode):
-	   {
-	     "id": "abc123",
-	     "saved": true,
-	     "results_count": 7
-	   }
-	   ------------------------------------------ */
-	register_rest_route( $ns, '/scan', [
-		'methods'             => 'POST',
-		'callback'            => function( WP_REST_Request $req ) {
-			$body = $req->get_json_params();
+		wp_enqueue_script(
+			'lhsc-angie-mcp',
+			plugin_dir_url( __FILE__ ) . 'angie/dist/mcp-server.js',
+			array(),
+			LHSC_VERSION,
+			true
+		);
 
-			// Trigger mode — return URLs and config so caller can run the scan
-			if ( ! empty( $body['trigger'] ) ) {
-				return rest_ensure_response( [
-					'action'           => 'scan_required',
-					'urls'             => lhsc_get_site_urls(),
-					'api_key_configured' => ! empty( lhsc_get_api_key() ),
-					'strategy'         => 'mobile',
-					'pagespeed_api'    => 'https://www.googleapis.com/pagespeedonline/v5/runPagespeed',
-					'message'          => 'Perform PageSpeed Insights scans on each URL using the API, then POST the results back to this endpoint in the standard scan format.',
-				] );
-			}
-
-			// Save mode — accept and store completed scan results
-			if ( empty( $body['results'] ) || ! is_array( $body['results'] ) ) {
-				return new WP_Error( 'invalid_data', 'Missing results array.', [ 'status' => 400 ] );
-			}
-
-			$entry = [
-				'id'        => sanitize_text_field( $body['id'] ?? uniqid( 'rest_' ) ),
-				'date'      => sanitize_text_field( $body['date'] ?? current_time( 'M j, Y' ) ),
-				'timestamp' => (int) ( $body['timestamp'] ?? time() ),
-				'strategy'  => in_array( $body['strategy'] ?? '', [ 'mobile', 'desktop' ], true )
-					? $body['strategy'] : 'mobile',
-				'results'   => [],
-			];
-
-			foreach ( (array) $body['results'] as $r ) {
-				$entry['results'][] = [
-					'url'    => esc_url_raw( $r['url'] ?? '' ),
-					'label'  => sanitize_text_field( $r['label'] ?? '' ),
-					'scores' => array_map( 'lhsc_normalize_score', (array) ( $r['scores'] ?? [] ) ),
-					'issues' => array_slice( array_map( function( $i ) {
-						return [
-							'category'     => sanitize_text_field( $i['category'] ?? '' ),
-							'title'        => sanitize_text_field( $i['title'] ?? '' ),
-							'description'  => sanitize_text_field( $i['description'] ?? '' ),
-							'displayValue' => sanitize_text_field( $i['displayValue'] ?? '' ),
-						];
-					}, (array) ( $r['issues'] ?? [] ) ), 0, 20 ),
-				];
-			}
-
-			$history = lhsc_get_history();
-			array_unshift( $history, $entry );
-			update_option( LHSC_OPT_HISTORY, array_slice( $history, 0, 20 ), false );
-
-			return rest_ensure_response( [
-				'id'            => $entry['id'],
-				'saved'         => true,
-				'results_count' => count( $entry['results'] ),
-			] );
-		},
-		'permission_callback' => $auth,
-	] );
-
-	/* ------------------------------------------
-	   DELETE /history
-	   Clears all stored scan history.
-	   ------------------------------------------ */
-	register_rest_route( $ns, '/history', [
-		'methods'             => 'DELETE',
-		'callback'            => function() {
-			delete_option( LHSC_OPT_HISTORY );
-			return rest_ensure_response( [ 'cleared' => true ] );
-		},
-		'permission_callback' => $auth,
-	] );
-
-} );
-
-/* =============================================
-   ANGIE MCP SERVER
-   Enqueues the compiled Angie MCP server JS on
-   admin pages where Angie is active.
-
-   The JS at angie/dist/mcp-server.js registers
-   three tools with Angie:
-     - get-lighthouse-urls
-     - get-lighthouse-history
-     - run-lighthouse-scan
-
-   BUILD INSTRUCTIONS (one-time, needs Node.js):
-     cd wp-content/plugins/lighthouse-scanner/angie
-     npm install
-     npm run build
-   This produces angie/dist/mcp-server.js which
-   WordPress loads automatically on admin pages.
-   ============================================= */
-add_action( 'admin_enqueue_scripts', function() {
-    $dist = plugin_dir_path( __FILE__ ) . 'angie/dist/mcp-server.js';
-
-    // Only load if built file exists
-    if ( ! file_exists( $dist ) ) return;
-
-    // Only load if Elementor is active (Angie lives inside Elementor)
-    if ( ! defined( 'ELEMENTOR_VERSION' ) && ! class_exists( 'Elementor\\Plugin' ) ) return;
-
-    wp_enqueue_script(
-        'lhsc-angie-mcp',
-        plugin_dir_url( __FILE__ ) . 'angie/dist/mcp-server.js',
-        [],
-        LHSC_VERSION,
-        true
-    );
-
-    // Pass REST URL, nonce, API key, and version to the JS
-    wp_localize_script( 'lhsc-angie-mcp', 'lhscAngie', [
-        'restUrl' => esc_url_raw( rest_url() ),
-        'nonce'   => wp_create_nonce( 'wp_rest' ),
-        'apiKey'  => lhsc_get_api_key(),
-        'version' => LHSC_VERSION,
-    ] );
-} );
+		// Pass REST URL, nonce, API key, and version to the JS.
+		wp_localize_script(
+			'lhsc-angie-mcp',
+			'lhscAngie',
+			array(
+				'restUrl' => esc_url_raw( rest_url() ),
+				'nonce'   => wp_create_nonce( 'wp_rest' ),
+				'apiKey'  => lhsc_get_api_key(),
+				'version' => LHSC_VERSION,
+			)
+		);
+	}
+);

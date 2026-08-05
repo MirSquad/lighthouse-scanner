@@ -12,6 +12,8 @@
  *   lhsc_history      — Scan history (up to 20 entries)
  *   lhsc_score_scale_fixed_v2 — Migration flag for the 0-100/0-1 score scale fix
  *   lhsc_update_notice — Transient for regression alert notice
+ *
+ * @package Lighthouse_Scanner
  */
 
 if ( ! defined( 'WP_UNINSTALL_PLUGIN' ) ) {

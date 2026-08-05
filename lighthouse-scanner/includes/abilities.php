@@ -6,6 +6,8 @@
  * Read abilities are always registered.
  * Write abilities are only registered when "Enable write abilities" is on
  * in Tools > Lighthouse Scanner.
+ *
+ * @package Lighthouse_Scanner
  */
 
 if ( ! defined( 'ABSPATH' ) ) {
@@ -21,9 +23,15 @@ if ( ! function_exists( 'wp_register_ability' ) ) {
 // Background scan — hooked into WP-Cron so it runs after run-scan returns.
 // -------------------------------------------------------------------------
 add_action( 'lhsc_ability_run_scan', 'lhsc_ability_do_scan' );
+/**
+ * Run a PageSpeed Insights scan across the site's URLs (WP-Cron background job).
+ *
+ * @param string $strategy Scan strategy, "mobile" or "desktop".
+ * @return void
+ */
 function lhsc_ability_do_scan( $strategy = 'mobile' ) {
 
-	$strategy = ( $strategy === 'desktop' ) ? 'desktop' : 'mobile';
+	$strategy = ( 'desktop' === $strategy ) ? 'desktop' : 'mobile';
 	$api_key  = lhsc_get_api_key();
 	$urls     = lhsc_get_site_urls();
 
@@ -53,7 +61,13 @@ function lhsc_ability_do_scan( $strategy = 'mobile' ) {
 			. '&category=performance&category=accessibility&category=best-practices&category=seo'
 			. ( $api_key ? '&key=' . rawurlencode( $api_key ) : '' );
 
-		$response = wp_remote_get( $api_url, array( 'timeout' => 60, 'sslverify' => true ) );
+		$response = wp_remote_get(
+			$api_url,
+			array(
+				'timeout'   => 60,
+				'sslverify' => true,
+			)
+		);
 
 		if ( is_wp_error( $response ) || wp_remote_retrieve_response_code( $response ) !== 200 ) {
 			continue;
@@ -79,11 +93,17 @@ function lhsc_ability_do_scan( $strategy = 'mobile' ) {
 		foreach ( $cats as $cat_id => $cat ) {
 			foreach ( (array) ( $cat['auditRefs'] ?? array() ) as $ref ) {
 				$audit = $audits[ $ref['id'] ] ?? null;
-				if ( ! $audit ) continue;
+				if ( ! $audit ) {
+					continue;
+				}
 				$mode = $audit['scoreDisplayMode'] ?? '';
-				if ( $mode === 'notApplicable' || $mode === 'informative' ) continue;
+				if ( 'notApplicable' === $mode || 'informative' === $mode ) {
+					continue;
+				}
 				$score = $audit['score'] ?? null;
-				if ( $score === null || $score >= 0.9 ) continue;
+				if ( null === $score || $score >= 0.9 ) {
+					continue;
+				}
 
 				// Capture up to 5 resource-level items for opportunity/table audits.
 				$items = array();
@@ -138,93 +158,133 @@ function lhsc_ability_do_scan( $strategy = 'mobile' ) {
 // Register category.
 // -------------------------------------------------------------------------
 add_action( 'wp_abilities_api_categories_init', 'lhsc_register_ability_category' );
+/**
+ * Register the "Lighthouse Scanner" ability category.
+ *
+ * @return void
+ */
 function lhsc_register_ability_category() {
-	wp_register_ability_category( 'lighthouse-scanner', array(
-		'label'       => __( 'Lighthouse Scanner', 'lighthouse-scanner' ),
-		'description' => __( 'Run PageSpeed Insights scans and read Lighthouse scan results.', 'lighthouse-scanner' ),
-	) );
+	wp_register_ability_category(
+		'lighthouse-scanner',
+		array(
+			'label'       => __( 'Lighthouse Scanner', 'lighthouse-scanner' ),
+			'description' => __( 'Run PageSpeed Insights scans and read Lighthouse scan results.', 'lighthouse-scanner' ),
+		)
+	);
 }
 
 // -------------------------------------------------------------------------
 // Register abilities.
 // -------------------------------------------------------------------------
 add_action( 'wp_abilities_api_init', 'lhsc_register_abilities' );
+/**
+ * Register the Lighthouse Scanner abilities (get-settings, get-history, and gated run-scan).
+ *
+ * @return void
+ */
 function lhsc_register_abilities() {
 
 	// --- get-settings (always available) ---------------------------------
 
-	wp_register_ability( 'lighthouse-scanner/get-settings', array(
-		'label'       => __( 'Get Settings', 'lighthouse-scanner' ),
-		'description' => __( 'Retrieve Lighthouse Scanner settings: score alert threshold and setup status. The API key is masked.', 'lighthouse-scanner' ),
-		'category'    => 'lighthouse-scanner',
-		'output_schema' => array(
-			'type'       => 'object',
-			'properties' => array(
-				'threshold'   => array( 'type' => 'integer', 'description' => 'Score alert threshold (0–100).' ),
-				'setup_done'  => array( 'type' => 'boolean' ),
-				'api_key_set' => array( 'type' => 'boolean', 'description' => 'Whether a Google API key is saved.' ),
+	wp_register_ability(
+		'lighthouse-scanner/get-settings',
+		array(
+			'label'               => __( 'Get Settings', 'lighthouse-scanner' ),
+			'description'         => __( 'Retrieve Lighthouse Scanner settings: score alert threshold and setup status. The API key is masked.', 'lighthouse-scanner' ),
+			'category'            => 'lighthouse-scanner',
+			'output_schema'       => array(
+				'type'       => 'object',
+				'properties' => array(
+					'threshold'   => array(
+						'type'        => 'integer',
+						'description' => 'Score alert threshold (0–100).',
+					),
+					'setup_done'  => array( 'type' => 'boolean' ),
+					'api_key_set' => array(
+						'type'        => 'boolean',
+						'description' => 'Whether a Google API key is saved.',
+					),
+				),
 			),
-		),
-		'permission_callback' => fn() => current_user_can( 'manage_options' ),
-		'execute_callback'    => function( $input = null ) {
-			return array(
-				'threshold'   => (int) get_option( LHSC_OPT_THRESHOLD, 85 ),
-				'setup_done'  => (bool) get_option( LHSC_OPT_SETUP, false ),
-				'api_key_set' => '' !== lhsc_get_api_key(),
-			);
-		},
-		'meta' => array(
-			'mcp'        => array( 'public' => true ),
-			'annotations' => array( 'readonly' => true, 'destructive' => false, 'idempotent' => true ),
-		),
-	) );
+			'permission_callback' => fn() => current_user_can( 'manage_options' ),
+			'execute_callback'    => function () {
+				return array(
+					'threshold'   => (int) get_option( LHSC_OPT_THRESHOLD, 85 ),
+					'setup_done'  => (bool) get_option( LHSC_OPT_SETUP, false ),
+					'api_key_set' => '' !== lhsc_get_api_key(),
+				);
+			},
+			'meta'                => array(
+				'mcp'         => array( 'public' => true ),
+				'annotations' => array(
+					'readonly'    => true,
+					'destructive' => false,
+					'idempotent'  => true,
+				),
+			),
+		)
+	);
 
 	// --- get-urls (always available) -------------------------------------
 
-	wp_register_ability( 'lighthouse-scanner/get-urls', array(
-		'label'       => __( 'Get Scan URLs', 'lighthouse-scanner' ),
-		'description' => __( 'Retrieve the list of URLs configured for Lighthouse scanning, with display labels.', 'lighthouse-scanner' ),
-		'category'    => 'lighthouse-scanner',
-		'output_schema' => array(
-			'type'  => 'array',
-			'items' => array(
-				'type'       => 'object',
-				'properties' => array(
-					'url'   => array( 'type' => 'string' ),
-					'label' => array( 'type' => 'string' ),
+	wp_register_ability(
+		'lighthouse-scanner/get-urls',
+		array(
+			'label'               => __( 'Get Scan URLs', 'lighthouse-scanner' ),
+			'description'         => __( 'Retrieve the list of URLs configured for Lighthouse scanning, with display labels.', 'lighthouse-scanner' ),
+			'category'            => 'lighthouse-scanner',
+			'output_schema'       => array(
+				'type'  => 'array',
+				'items' => array(
+					'type'       => 'object',
+					'properties' => array(
+						'url'   => array( 'type' => 'string' ),
+						'label' => array( 'type' => 'string' ),
+					),
 				),
 			),
-		),
-		'permission_callback' => fn() => current_user_can( 'manage_options' ),
-		'execute_callback'    => function( $input = null ) {
-			return array_values( lhsc_get_site_urls() );
-		},
-		'meta' => array(
-			'mcp'        => array( 'public' => true ),
-			'annotations' => array( 'readonly' => true, 'destructive' => false, 'idempotent' => true ),
-		),
-	) );
+			'permission_callback' => fn() => current_user_can( 'manage_options' ),
+			'execute_callback'    => function () {
+				return array_values( lhsc_get_site_urls() );
+			},
+			'meta'                => array(
+				'mcp'         => array( 'public' => true ),
+				'annotations' => array(
+					'readonly'    => true,
+					'destructive' => false,
+					'idempotent'  => true,
+				),
+			),
+		)
+	);
 
 	// --- get-history (always available) ----------------------------------
 
-	wp_register_ability( 'lighthouse-scanner/get-history', array(
-		'label'       => __( 'Get Scan History', 'lighthouse-scanner' ),
-		'description' => __( 'Retrieve Lighthouse scan history. Returns up to 20 entries, newest first. Each entry includes URL, scores, strategy, and timestamp.', 'lighthouse-scanner' ),
-		'category'    => 'lighthouse-scanner',
-		'output_schema' => array(
-			'type'  => 'array',
-			'items' => array( 'type' => 'object' ),
-		),
-		'permission_callback' => fn() => current_user_can( 'manage_options' ),
-		'execute_callback'    => function( $input = null ) {
-			$history = lhsc_get_history();
-			return array_reverse( array_values( $history ) );
-		},
-		'meta' => array(
-			'mcp'        => array( 'public' => true ),
-			'annotations' => array( 'readonly' => true, 'destructive' => false, 'idempotent' => true ),
-		),
-	) );
+	wp_register_ability(
+		'lighthouse-scanner/get-history',
+		array(
+			'label'               => __( 'Get Scan History', 'lighthouse-scanner' ),
+			'description'         => __( 'Retrieve Lighthouse scan history. Returns up to 20 entries, newest first. Each entry includes URL, scores, strategy, and timestamp.', 'lighthouse-scanner' ),
+			'category'            => 'lighthouse-scanner',
+			'output_schema'       => array(
+				'type'  => 'array',
+				'items' => array( 'type' => 'object' ),
+			),
+			'permission_callback' => fn() => current_user_can( 'manage_options' ),
+			'execute_callback'    => function () {
+				$history = lhsc_get_history();
+				return array_reverse( array_values( $history ) );
+			},
+			'meta'                => array(
+				'mcp'         => array( 'public' => true ),
+				'annotations' => array(
+					'readonly'    => true,
+					'destructive' => false,
+					'idempotent'  => true,
+				),
+			),
+		)
+	);
 
 	// --- Write abilities (gated by option) --------------------------------
 
@@ -232,48 +292,55 @@ function lhsc_register_abilities() {
 		return;
 	}
 
-	wp_register_ability( 'lighthouse-scanner/run-scan', array(
-		'label'       => __( 'Run Scan', 'lighthouse-scanner' ),
-		'description' => __( 'Kick off a PageSpeed Insights scan of all configured URLs in the background. Returns immediately. Wait ~60 seconds then call get-history to retrieve results.', 'lighthouse-scanner' ),
-		'category'    => 'lighthouse-scanner',
-		'input_schema' => array(
-			'type'       => 'object',
-			'properties' => array(
-				'strategy' => array(
-					'type'    => 'string',
-					'enum'    => array( 'mobile', 'desktop' ),
-					'default' => 'mobile',
-					'description' => 'Device strategy for the scan.',
+	wp_register_ability(
+		'lighthouse-scanner/run-scan',
+		array(
+			'label'               => __( 'Run Scan', 'lighthouse-scanner' ),
+			'description'         => __( 'Kick off a PageSpeed Insights scan of all configured URLs in the background. Returns immediately. Wait ~60 seconds then call get-history to retrieve results.', 'lighthouse-scanner' ),
+			'category'            => 'lighthouse-scanner',
+			'input_schema'        => array(
+				'type'       => 'object',
+				'properties' => array(
+					'strategy' => array(
+						'type'        => 'string',
+						'enum'        => array( 'mobile', 'desktop' ),
+						'default'     => 'mobile',
+						'description' => 'Device strategy for the scan.',
+					),
 				),
 			),
-		),
-		'output_schema' => array(
-			'type'       => 'object',
-			'properties' => array(
-				'started' => array( 'type' => 'boolean' ),
-				'message' => array( 'type' => 'string' ),
-				'strategy' => array( 'type' => 'string' ),
+			'output_schema'       => array(
+				'type'       => 'object',
+				'properties' => array(
+					'started'  => array( 'type' => 'boolean' ),
+					'message'  => array( 'type' => 'string' ),
+					'strategy' => array( 'type' => 'string' ),
+				),
 			),
-		),
-		'permission_callback' => fn() => current_user_can( 'manage_options' ),
-		'execute_callback'    => function( $input = null ) {
-			$strategy = ( isset( $input['strategy'] ) && $input['strategy'] === 'desktop' ) ? 'desktop' : 'mobile';
+			'permission_callback' => fn() => current_user_can( 'manage_options' ),
+			'execute_callback'    => function ( $input = null ) {
+				$strategy = ( isset( $input['strategy'] ) && 'desktop' === $input['strategy'] ) ? 'desktop' : 'mobile';
 
-			// Schedule scan to run immediately via WP-Cron.
-			wp_schedule_single_event( time() - 1, 'lhsc_ability_run_scan', array( $strategy ) );
+				// Schedule scan to run immediately via WP-Cron.
+				wp_schedule_single_event( time() - 1, 'lhsc_ability_run_scan', array( $strategy ) );
 
-			// Spawn cron now so it fires without waiting for the next page load.
-			spawn_cron();
+				// Spawn cron now so it fires without waiting for the next page load.
+				spawn_cron();
 
-			return array(
-				'started'  => true,
-				'strategy' => $strategy,
-				'message'  => __( 'Scan started in the background. Wait ~60 seconds then call get-history to retrieve results.', 'lighthouse-scanner' ),
-			);
-		},
-		'meta' => array(
-			'mcp'        => array( 'public' => true ),
-			'annotations' => array( 'readonly' => false, 'destructive' => false, 'idempotent' => false ),
-		),
-	) );
+				return array(
+					'started'  => true,
+					'strategy' => $strategy,
+					'message'  => __( 'Scan started in the background. Wait ~60 seconds then call get-history to retrieve results.', 'lighthouse-scanner' ),
+				);
+			},
+			'meta'                => array(
+				'mcp'         => array( 'public' => true ),
+				'annotations' => array(
+					'readonly'    => false,
+					'destructive' => false,
+					'idempotent'  => false,
+				),
+			),
+		)
+	);
 }
