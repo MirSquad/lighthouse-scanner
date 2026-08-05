@@ -64,10 +64,10 @@ Scores at or below the threshold value are highlighted red. The default is 85. S
 
 == Changelog ==
 
-= 2.3.11 =
+= 2.3.11 - 2026-08-05 =
 * Security: the inline settings data printed into the admin page is now hardened against breaking out of its script context. Server and request values are sanitized, and several type and unreachable-code issues were fixed. WordPress coding-standards cleanup.
 
-= 2.2.0 =
+= 2.2.0 - 2026-05-21 =
 * Added: REST API (`lighthouse-scanner/v1`) for AI agent and external tool integration.
 * Added: `GET /urls`, `GET /history`, `GET /history/{id}`, `POST /scan`, `DELETE /history` endpoints.
 

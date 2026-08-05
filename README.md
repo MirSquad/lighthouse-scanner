@@ -55,6 +55,10 @@ The plugin includes an MCP server for Elementor's Angie AI assistant. When Eleme
 
 Build the MCP server (one-time): `cd angie && npm install && npm run build`
 
+## Changelog
+
+See [CHANGELOG.md](CHANGELOG.md) for release history.
+
 ## Requirements
 
 - WordPress 5.0+
