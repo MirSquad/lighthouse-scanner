@@ -3,9 +3,9 @@
  * WordPress Abilities API integration for Lighthouse Scanner.
  * Requires WP 6.9+ (Abilities API). Does nothing on older versions.
  *
- * Read abilities are always registered.
- * Write abilities are only registered when "Enable write abilities" is on
- * in Tools > Lighthouse Scanner.
+ * All abilities are always registered. The write ability is marked
+ * destructive (it consumes external API quota); compliant AI clients
+ * must confirm with the user before running it.
  *
  * @package Lighthouse_Scanner
  */
@@ -178,7 +178,7 @@ function lhsc_register_ability_category() {
 // -------------------------------------------------------------------------
 add_action( 'wp_abilities_api_init', 'lhsc_register_abilities' );
 /**
- * Register the Lighthouse Scanner abilities (get-settings, get-history, and gated run-scan).
+ * Register the Lighthouse Scanner abilities (get-settings, get-history, run-scan).
  *
  * @return void
  */
@@ -286,11 +286,7 @@ function lhsc_register_abilities() {
 		)
 	);
 
-	// --- Write abilities (gated by option) --------------------------------
-
-	if ( ! get_option( 'lhsc_write_abilities', false ) ) {
-		return;
-	}
+	// --- run-scan (always available) ---------------------------------------
 
 	wp_register_ability(
 		'lighthouse-scanner/run-scan',
@@ -337,7 +333,7 @@ function lhsc_register_abilities() {
 				'mcp'         => array( 'public' => true ),
 				'annotations' => array(
 					'readonly'    => false,
-					'destructive' => false,
+					'destructive' => true,
 					'idempotent'  => false,
 				),
 			),

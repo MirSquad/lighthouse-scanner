@@ -4,7 +4,7 @@ Tags: lighthouse, pagespeed, performance, accessibility, seo
 Requires at least: 5.9
 Tested up to: 6.8
 Requires PHP: 7.4
-Stable tag: 2.3.11
+Stable tag: 2.3.12
 License: GPLv2 or later
 License URI: https://www.gnu.org/licenses/gpl-2.0.html
 
@@ -63,6 +63,9 @@ Yes. The plugin exposes a REST API at `lighthouse-scanner/v1` that requires the 
 Scores at or below the threshold value are highlighted red. The default is 85. Set it to 0 to disable alerts, or 100 to flag everything below perfect.
 
 == Changelog ==
+
+= 2.3.12 - 2026-08-10 =
+* Changed: Removed the "Enable write abilities" settings checkbox for the Abilities API. The run-scan ability is now always registered and marked destructive (it consumes external PageSpeed API quota) — confirmation happens via the AI client, not a site-wide toggle.
 
 = 2.3.11 - 2026-08-05 =
 * Security: the inline settings data printed into the admin page is now hardened against breaking out of its script context. Server and request values are sanitized, and several type and unreachable-code issues were fixed. WordPress coding-standards cleanup.

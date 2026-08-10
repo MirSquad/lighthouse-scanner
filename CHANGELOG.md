@@ -1,5 +1,9 @@
 # Changelog
 
+## 2.3.12 — 2026-08-10
+
+- Changed: Removed the "Enable write abilities" settings checkbox for the Abilities API. The run-scan ability is now always registered and marked destructive (it consumes external PageSpeed API quota) — confirmation happens via the AI client, not a site-wide toggle.
+
 ## 2.3.11 — 2026-08-05
 
 - Security: the inline settings data printed into the admin page is now hardened against breaking out of its script context. Server and request values are sanitized, and several type and unreachable-code issues were fixed. WordPress coding-standards cleanup.
