@@ -5,7 +5,7 @@ node_modules/
 analysis/
 archive/
 *-decisions-log.md
-*-handoff.md
+*-handoff*.md
 *-project-context.md
 *-session-opener.md
 *-changelog.md
